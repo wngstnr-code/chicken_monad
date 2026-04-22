@@ -14,4 +14,5 @@ smart-contracts/cache
 smart-contracts/node_modules
 .env.local
 frontend/.env.local
+backend/.env
 frontend/tsconfig.tsbuildinfo
