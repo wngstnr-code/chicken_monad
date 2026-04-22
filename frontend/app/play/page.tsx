@@ -19,7 +19,7 @@ export default function PlayPage({ searchParams }: PlayPageProps) {
           <a href="/deposit">Deposit</a>
         </nav>
       )}
-      <GameCanvas />
+      <GameCanvas backgroundMode={isBackgroundMode} />
     </div>
   );
 }

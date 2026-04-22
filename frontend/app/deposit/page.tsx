@@ -23,6 +23,22 @@ export default function DepositPage() {
     }
   }
 
+  async function handleWithdrawClick() {
+    try {
+      await flow.onWithdraw();
+    } catch {
+      // Error sudah ditangani di flow implementation.
+    }
+  }
+
+  async function handleFaucetClick() {
+    try {
+      await flow.onClaimFaucet();
+    } catch {
+      // Error sudah ditangani di flow implementation.
+    }
+  }
+
   return (
     <main className="flow-page">
       <section className="flow-card">
@@ -49,14 +65,27 @@ export default function DepositPage() {
             <span className="mono">{flow.usdcAddress || "(set in frontend/.env.local)"}</span>
           </p>
           <p>
+            Faucet Address:{" "}
+            <span className="mono">{flow.faucetAddress || "(set in frontend/.env.local)"}</span>
+          </p>
+          <p>
             Vault Address:{" "}
             <span className="mono">{flow.vaultAddress || "(set in frontend/.env.local)"}</span>
+          </p>
+          <p>
+            Faucet Claim: <span className="mono">{flow.faucetClaimAmountDisplay}</span>
           </p>
           <p>
             Wallet USDC: <span className="mono">{flow.walletBalanceDisplay}</span>
           </p>
           <p>
             Allowance: <span className="mono">{flow.allowanceDisplay}</span>
+          </p>
+          <p>
+            Vault Available: <span className="mono">{flow.availableBalanceDisplay}</span>
+          </p>
+          <p>
+            Vault Locked: <span className="mono">{flow.lockedBalanceDisplay}</span>
           </p>
         </div>
 
@@ -81,6 +110,14 @@ export default function DepositPage() {
           <button
             className="flow-btn"
             type="button"
+            disabled={flow.disableFaucetButton}
+            onClick={handleFaucetClick}
+          >
+            {flow.isFaucetBusy ? "Claiming..." : "Mint Faucet USDC"}
+          </button>
+          <button
+            className="flow-btn secondary"
+            type="button"
             disabled={flow.disableApproveButton}
             onClick={handleApproveClick}
           >
@@ -94,7 +131,28 @@ export default function DepositPage() {
           >
             {flow.isDepositBusy ? "Depositing..." : "Deposit To Vault"}
           </button>
+          <button
+            className="flow-btn secondary"
+            type="button"
+            disabled={flow.disableWithdrawButton}
+            onClick={handleWithdrawClick}
+          >
+            {flow.isWithdrawBusy ? "Withdrawing..." : "Withdraw From Vault"}
+          </button>
         </div>
+
+        {flow.faucetTxHash && (
+          <p className="flow-tx">
+            Faucet tx:{" "}
+            {flow.faucetTxUrl ? (
+              <a href={flow.faucetTxUrl} target="_blank" rel="noreferrer">
+                {flow.faucetTxHash}
+              </a>
+            ) : (
+              <span className="mono">{flow.faucetTxHash}</span>
+            )}
+          </p>
+        )}
 
         {flow.approveTxHash && (
           <p className="flow-tx">
@@ -118,6 +176,19 @@ export default function DepositPage() {
               </a>
             ) : (
               <span className="mono">{flow.depositTxHash}</span>
+            )}
+          </p>
+        )}
+
+        {flow.withdrawTxHash && (
+          <p className="flow-tx">
+            Withdraw tx:{" "}
+            {flow.withdrawTxUrl ? (
+              <a href={flow.withdrawTxUrl} target="_blank" rel="noreferrer">
+                {flow.withdrawTxHash}
+              </a>
+            ) : (
+              <span className="mono">{flow.withdrawTxHash}</span>
             )}
           </p>
         )}

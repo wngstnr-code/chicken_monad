@@ -71,6 +71,9 @@ export function setupGameGateway(httpServer: HttpServer): SocketServer {
     socket.on("game:start", async (data: { stake: number }) => {
       await handleGameStart(socket, walletAddress, data.stake);
     });
+    socket.on("game:abort_start", async (data: { sessionId?: string }) => {
+      await handleAbortStart(socket, walletAddress, data?.sessionId);
+    });
     socket.on("game:move", (data: { direction: string }) => {
       handleGameMove(socket, walletAddress, data.direction);
     });
@@ -159,6 +162,42 @@ async function handleGameStart(socket: Socket, walletAddress: string, stake: num
     mapSeed,
     serverTime: Date.now(),
   });
+}
+
+async function handleAbortStart(socket: Socket, walletAddress: string, sessionId?: string): Promise<void> {
+  const state = getGameByWallet(walletAddress);
+  if (!state) {
+    socket.emit("game:error", { message: "No active game session to abort." });
+    return;
+  }
+
+  if (sessionId && sessionId !== state.sessionId) {
+    socket.emit("game:error", { message: "Session mismatch while aborting start." });
+    return;
+  }
+
+  removeGameState(walletAddress);
+
+  await supabase
+    .from("game_sessions")
+    .delete()
+    .eq("session_id", state.sessionId)
+    .eq("wallet_address", walletAddress);
+
+  const { data: player } = await supabase
+    .from("players")
+    .select("total_games")
+    .eq("wallet_address", walletAddress)
+    .single();
+
+  if (player && player.total_games > 0) {
+    await supabase
+      .from("players")
+      .update({ total_games: player.total_games - 1 })
+      .eq("wallet_address", walletAddress);
+  }
+
+  console.log(`↩️ Start aborted: ${walletAddress} | Session: ${state.sessionId}`);
 }
 
 function handleGameMove(socket: Socket, walletAddress: string, direction: string): void {
@@ -445,6 +484,9 @@ function handleReconnect(socket: Socket, walletAddress: string, state: ActiveGam
 
   socket.on("game:move", (data: { direction: string }) => {
     handleGameMove(socket, walletAddress, data.direction);
+  });
+  socket.on("game:abort_start", async (data: { sessionId?: string }) => {
+    await handleAbortStart(socket, walletAddress, data?.sessionId);
   });
   socket.on("game:crash", () => {
     void handleGameCrash(socket, walletAddress, "client_reported");

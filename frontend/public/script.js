@@ -42,14 +42,35 @@ const bet = {
 };
 
 let gameOver = false;
+let settlementPending = false;
 
-function loadBalance() {
+function getBridge() {
+  return window.__CHICKEN_MONAD_BRIDGE__;
+}
+
+function hasLiveBridge() {
+  const bridge = getBridge();
+  return Boolean(bridge && !bridge.backgroundMode);
+}
+
+async function loadBalance() {
+  if (hasLiveBridge()) {
+    try {
+      bet.balance = await getBridge().loadAvailableBalance();
+      renderBalance();
+      return;
+    } catch (error) {
+      console.error("Failed to load live balance:", error);
+    }
+  }
+
   const saved = localStorage.getItem("chickenBetBalance");
   bet.balance = saved ? parseFloat(saved) : 0;
   renderBalance();
 }
 
 function saveBalance() {
+  if (hasLiveBridge()) return;
   localStorage.setItem("chickenBetBalance", bet.balance.toFixed(2));
 }
 
@@ -60,18 +81,23 @@ function renderBalance() {
 
 function deposit(amount) {
   if (!isFinite(amount) || amount <= 0) return;
+  if (hasLiveBridge()) {
+    getBridge().openDeposit(amount);
+    return;
+  }
   bet.balance += amount;
   saveBalance();
   renderBalance();
 }
 
-function startBet(stake) {
-  if (!isFinite(stake) || stake <= 0) return false;
-  if (stake > bet.balance) return false;
+function activateBet(stake, availableBalance) {
+  if (isFinite(availableBalance)) {
+    bet.balance = availableBalance;
+    renderBalance();
+  }
 
-  bet.balance -= stake;
-  saveBalance();
-  renderBalance();
+  settlementPending = false;
+  if (!isFinite(stake) || stake <= 0) return false;
 
   bet.active = true;
   bet.stake = stake;
@@ -93,6 +119,29 @@ function startBet(stake) {
 
   initializeGame();
   return true;
+}
+
+async function startBet(stake) {
+  if (!isFinite(stake) || stake <= 0) return false;
+
+  if (hasLiveBridge()) {
+    try {
+      const result = await getBridge().startBet(stake);
+      return activateBet(stake, result.availableBalance);
+    } catch (error) {
+      console.error("Failed to start live bet:", error);
+      alert(error?.message || "Failed to start live bet.");
+      void loadBalance();
+      return false;
+    }
+  }
+
+  if (stake > bet.balance) return false;
+
+  bet.balance -= stake;
+  saveBalance();
+  renderBalance();
+  return activateBet(stake, bet.balance);
 }
 
 function onPlayerAdvance(newRowIndex) {
@@ -141,9 +190,39 @@ function canCashOut() {
   return bet.active && bet.cashoutWindow;
 }
 
-function cashOut(reason) {
+async function cashOut(reason) {
   if (!bet.active) return;
   if (!bet.cashoutWindow) return; // only at CP with window open
+  if (settlementPending) return;
+
+  if (hasLiveBridge()) {
+    settlementPending = true;
+    try {
+      const result = await getBridge().cashOut();
+      bet.active = false;
+      stopBetTicker();
+      bet.balance = result.availableBalance;
+      renderBalance();
+      showBetHud(false);
+      showResult({
+        type: "cashout",
+        reason: reason || "manual",
+        stake: bet.stake,
+        multiplier: result.multiplier,
+        payout: result.payoutAmount,
+        profit: result.profit,
+        rows: bet.maxRow,
+        cp: bet.currentCp,
+      });
+    } catch (error) {
+      console.error("Failed to settle cashout:", error);
+      alert(error?.message || "Failed to settle cashout.");
+    } finally {
+      settlementPending = false;
+      void loadBalance();
+    }
+    return;
+  }
 
   bet.active = false;
   stopBetTicker();
@@ -168,8 +247,43 @@ function cashOut(reason) {
   });
 }
 
-function crashBet() {
+async function crashBet(reason) {
   if (!bet.active) return;
+  if (settlementPending) return;
+
+  if (hasLiveBridge()) {
+    settlementPending = true;
+    const mult = bet.multiplierBp / 10000;
+    const lostStake = bet.stake;
+    bet.active = false;
+    stopBetTicker();
+
+    try {
+      const result = await getBridge().crash(reason || "collision");
+      if (result && isFinite(result.availableBalance)) {
+        bet.balance = result.availableBalance;
+        renderBalance();
+      }
+      showBetHud(false);
+      showResult({
+        type: "crash",
+        stake: lostStake,
+        multiplier: result ? result.multiplier : mult,
+        payout: 0,
+        profit: -lostStake,
+        rows: bet.maxRow,
+        cp: bet.currentCp,
+      });
+    } catch (error) {
+      console.error("Failed to settle crash:", error);
+      alert(error?.message || "Failed to settle crash.");
+    } finally {
+      settlementPending = false;
+      void loadBalance();
+    }
+    return;
+  }
+
   bet.active = false;
   stopBetTicker();
 
@@ -925,6 +1039,9 @@ function queueMove(direction) {
   if (!isValidMove) return;
 
   movesQueue.push(direction);
+  if (hasLiveBridge()) {
+    getBridge().sendMove(direction);
+  }
 }
 
 function stepCompleted() {
@@ -1481,7 +1598,7 @@ function hitTest() {
 
       if (playerBoundingBox.intersectsBox(vehicleBoundingBox)) {
         if (bet.active) {
-          crashBet();
+          void crashBet("collision");
         } else {
           showResult({ type: "gameover" });
         }
@@ -1524,7 +1641,7 @@ function initializeGame() {
 }
 
 function initBettingUI() {
-  loadBalance();
+  void loadBalance();
   renderTimer(SEGMENT_TIME_MS, false);
 
   const depositBtn = document.getElementById("deposit-btn");
@@ -1580,7 +1697,7 @@ function initBettingUI() {
       alert("Enter a valid stake amount");
       return;
     }
-    if (stake > bet.balance) {
+    if (!hasLiveBridge() && stake > bet.balance) {
       alert(
         `Insufficient balance. You have $${bet.balance.toFixed(
           2
@@ -1588,7 +1705,7 @@ function initBettingUI() {
       );
       return;
     }
-    startBet(stake);
+    void startBet(stake);
   });
 
   document.getElementById("free-play-btn")?.addEventListener("click", () => {
@@ -1600,7 +1717,7 @@ function initBettingUI() {
   });
 
   document.getElementById("cash-out-btn")?.addEventListener("click", () => {
-    cashOut("manual");
+    void cashOut("manual");
   });
 
   document.getElementById("retry")?.addEventListener("click", () => {
@@ -1612,6 +1729,13 @@ function initBettingUI() {
   });
 
   showBetPanel(true);
+
+  window.addEventListener("chicken:game-error", (event) => {
+    const message = event?.detail?.message;
+    if (message) {
+      console.error("Backend game error:", message);
+    }
+  });
 }
 
 const renderer = Renderer();

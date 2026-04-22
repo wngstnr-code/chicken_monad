@@ -21,6 +21,13 @@ export default function ConnectPage() {
     monadChainIdHex,
     monadChainName,
     clearWalletError,
+    backendApiUrl,
+    hasBackendApiConfig,
+    isBackendAuthenticated,
+    isBackendAuthLoading,
+    backendAuthError,
+    authenticateBackend,
+    logoutBackend,
   } = useWallet();
 
   const isConnected = Boolean(account);
@@ -49,6 +56,12 @@ export default function ConnectPage() {
             Monad: <strong>{isMonadChain ? "Yes" : "No"}</strong>
           </p>
           <p>
+            Backend: <strong>{isBackendAuthenticated ? "Authenticated" : "Not authenticated"}</strong>
+          </p>
+          <p>
+            Backend URL: <span className="mono">{backendApiUrl || "(set in frontend/.env.local)"}</span>
+          </p>
+          <p>
             Target Chain:{" "}
             <span className="mono">
               {monadChainName} {monadChainIdHex || "(set in frontend/.env.local)"}
@@ -63,6 +76,13 @@ export default function ConnectPage() {
           </p>
         )}
 
+        {!hasBackendApiConfig && (
+          <p className="flow-alert">
+            Backend API belum dikonfigurasi. Isi `NEXT_PUBLIC_BACKEND_API_URL` di
+            `frontend/.env.local`.
+          </p>
+        )}
+
         {error && (
           <p className="flow-alert">
             {error}{" "}
@@ -71,6 +91,8 @@ export default function ConnectPage() {
             </button>
           </p>
         )}
+
+        {backendAuthError && <p className="flow-alert">{backendAuthError}</p>}
 
         <div className="flow-actions">
           <button
@@ -96,6 +118,29 @@ export default function ConnectPage() {
             disabled={!isConnected}
           >
             Clear Session
+          </button>
+        </div>
+
+        <div className="flow-actions">
+          <button
+            className="flow-btn secondary"
+            type="button"
+            onClick={() => void authenticateBackend()}
+            disabled={!isConnected || !hasBackendApiConfig || isBackendAuthLoading}
+          >
+            {isBackendAuthLoading
+              ? "Signing In..."
+              : isBackendAuthenticated
+                ? "Backend Ready"
+                : "Sign In To Backend"}
+          </button>
+          <button
+            className="flow-btn secondary"
+            type="button"
+            onClick={() => void logoutBackend()}
+            disabled={!hasBackendApiConfig || !isBackendAuthenticated}
+          >
+            Logout Backend
           </button>
         </div>
 

@@ -8,6 +8,15 @@ Semua kontrak deploy sebagai proxy UUPS (`ERC1967Proxy` + implementation terpisa
 - `GameVault`: custody layer dengan `available`, `locked`, dan `treasury`
 - `GameSettlement`: session manager yang memverifikasi EIP-712 signature dari backend
 
+## Current Testnet Deployment
+
+Proxy yang aktif dan sudah diverifikasi di MonadVision / Sourcify:
+
+- `GameUSDC`: `0xAeffBE902D7e5c53fba1CB08a343E5C077605B4f`
+- `USDCFaucet`: `0x35eCb74C54D3f2d1a7a4bFFd608B5598c39A63C7`
+- `GameVault`: `0x3e80F71d5FfcbB9A5507e97D8262BC866430cdDd`
+- `GameSettlement`: `0x2bE08dAe6C69ed133E5d91d0CE60bB54ad987e8F`
+
 ## Contracts
 
 ### GameUSDC
@@ -59,19 +68,24 @@ Semua kontrak deploy sebagai proxy UUPS (`ERC1967Proxy` + implementation terpisa
 
 ## Environment
 
-Tambahkan minimal env berikut di `sc/.env`:
+Tambahkan env berikut di `sc/.env`:
 
 ```bash
-MONAD_TESTNET_RPC_URL=https://your-monad-testnet-rpc
-PRIVATE_KEY=your_private_key_without_0x
+MONAD_RPC_URL=https://your-monad-testnet-rpc
+PRIVATE_KEY=0xyour_private_key
+INITIAL_OWNER=0xyour_owner_address
 USDC_FAUCET_CLAIM_AMOUNT=100000000
 BACKEND_SIGNER=0xyour_backend_signer_address
 SESSION_EXPIRY_DELAY=86400
 ```
 
+Minimal yang dibutuhkan untuk broadcast hanyalah `MONAD_RPC_URL` dan `PRIVATE_KEY`.
+`PRIVATE_KEY` boleh memakai prefix `0x`.
+`INITIAL_OWNER` opsional. Jika tidak diisi, deploy script memakai address dari `PRIVATE_KEY`.
 `USDC_FAUCET_CLAIM_AMOUNT` opsional. Default-nya `100000000` atau `100 USDC` dengan 6 desimal.
 `BACKEND_SIGNER` opsional. Jika tidak diisi, deploy script memakai `INITIAL_OWNER`.
 `SESSION_EXPIRY_DELAY` opsional. Default-nya `86400` detik atau `1 hari`.
+`GAME_SETTLEMENT_ADDRESS` dan `NEW_BACKEND_SIGNER` dipakai saat kamu ingin mengganti signer backend setelah deploy.
 
 ## Commands
 
@@ -79,6 +93,15 @@ SESSION_EXPIRY_DELAY=86400
 
 ```bash
 forge build
+```
+
+### Build For MonadVision / Sourcify
+
+Untuk deployment baru yang ingin kompatibel dengan alur verifikasi MonadVision/Sourcify sesuai docs Monad,
+pakai profile khusus ini:
+
+```bash
+FOUNDRY_PROFILE=monad_vision forge build
 ```
 
 ### Test
@@ -95,17 +118,31 @@ forge fmt
 
 ## Deploy To Monad Testnet
 
+### Standard Deploy
+
+Ini memakai profile default repo saat ini:
+
 Jika env sudah dimuat:
 
 ```bash
 source .env
-forge script script/DeployGameContracts.s.sol:DeployGameContracts --rpc-url "$MONAD_TESTNET_RPC_URL" --broadcast
+forge script script/DeployGameContracts.s.sol:DeployGameContracts --rpc-url "$MONAD_RPC_URL" --broadcast
 ```
 
 Atau jika ingin tetap pakai argumen private key dari CLI:
 
 ```bash
-forge script script/DeployGameContracts.s.sol:DeployGameContracts --rpc-url "$MONAD_TESTNET_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast
+forge script script/DeployGameContracts.s.sol:DeployGameContracts --rpc-url "$MONAD_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast
+```
+
+### Deploy For MonadVision / Sourcify
+
+Kalau kamu ingin deployment baru yang sejak awal mengikuti konfigurasi yang direkomendasikan docs Monad untuk
+MonadVision / Sourcify, gunakan:
+
+```bash
+source .env
+FOUNDRY_PROFILE=monad_vision forge script script/DeployGameContracts.s.sol:DeployGameContracts --rpc-url "$MONAD_RPC_URL" --broadcast
 ```
 
 Script deploy akan:
@@ -125,6 +162,71 @@ NEXT_PUBLIC_GAME_SETTLEMENT_ADDRESS=<deployed_game_settlement>
 ```
 
 Alamat yang dipakai frontend adalah alamat proxy, bukan implementation.
+
+## Verification
+
+### Current Live Deployment
+
+Deployment yang sedang live saat ini sudah berhasil diverifikasi melalui explorer gaya Etherscan
+(`Monadscan` / `Socialscan`).
+
+Kalau alamat yang sama belum muncul sebagai verified di `MonadVision`, penyebab paling mungkin adalah deployment itu
+dibuat sebelum repo ini memakai konfigurasi yang direkomendasikan Sourcify / MonadVision.
+Perubahan config setelah kontrak terlanjur live tidak bisa mengubah metadata bytecode kontrak yang sudah terdeploy.
+
+Artinya:
+
+- deployment live sekarang: sudah verified di `Monadscan` / `Socialscan`
+- deployment baru dengan `FOUNDRY_PROFILE=monad_vision`: disiapkan supaya cocok dengan alur `MonadVision / Sourcify`
+
+### Verify On MonadVision / Sourcify
+
+Untuk deployment baru yang dibangun dengan profile `monad_vision`, gunakan pola resmi docs Monad:
+
+```bash
+FOUNDRY_PROFILE=monad_vision forge verify-contract \
+  <contract_address> \
+  <contract_name> \
+  --chain 10143 \
+  --verifier sourcify \
+  --verifier-url https://sourcify-api-monad.blockvision.org/
+```
+
+### Verify On Monadscan / Socialscan
+
+Untuk explorer yang memakai flow `etherscan`, gunakan:
+
+```bash
+forge verify-contract \
+  <contract_address> \
+  <contract_name> \
+  --chain 10143 \
+  --watch \
+  --etherscan-api-key test \
+  --verifier-url https://api.socialscan.io/monad-testnet/v1/explorer/command_api/contract \
+  --verifier etherscan
+```
+
+## Rotate Backend Signer
+
+Kalau wallet backend berbeda dari wallet deployer / owner, update signer onchain dengan script ini:
+
+Tambahkan env berikut di `sc/.env`:
+
+```bash
+GAME_SETTLEMENT_ADDRESS=0xyour_game_settlement_proxy
+NEW_BACKEND_SIGNER=0xyour_new_backend_signer_address
+```
+
+Lalu jalankan:
+
+```bash
+source .env
+forge script script/UpdateBackendSigner.s.sol:UpdateBackendSigner --rpc-url "$MONAD_RPC_URL" --broadcast
+```
+
+Script ini memanggil `setBackendSigner(newBackendSigner)` pada proxy `GameSettlement`.
+Pastikan `PRIVATE_KEY` yang dipakai adalah owner kontrak `GameSettlement`.
 
 ## Flow Backend-Authoritative
 

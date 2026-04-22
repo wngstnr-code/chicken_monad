@@ -23,6 +23,13 @@ Off-chain game validator server untuk Chicken Monad (Crossy Chicken on Monad Blo
 └─────────────────────────────────────────────────┘
 ```
 
+## Current Testnet Addresses
+
+- `GameUSDC`: `0xAeffBE902D7e5c53fba1CB08a343E5C077605B4f`
+- `USDCFaucet`: `0x35eCb74C54D3f2d1a7a4bFFd608B5598c39A63C7`
+- `GameVault`: `0x3e80F71d5FfcbB9A5507e97D8262BC866430cdDd`
+- `GameSettlement`: `0x2bE08dAe6C69ed133E5d91d0CE60bB54ad987e8F`
+
 ## Quick Start
 
 ### 1. Setup Environment

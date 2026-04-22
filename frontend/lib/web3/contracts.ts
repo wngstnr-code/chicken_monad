@@ -3,7 +3,11 @@ import { isAddress } from "viem";
 export const USDC_DECIMALS = 6;
 
 export const USDC_ADDRESS: string = process.env.NEXT_PUBLIC_USDC_ADDRESS || "";
+export const USDC_FAUCET_ADDRESS: string =
+  process.env.NEXT_PUBLIC_USDC_FAUCET_ADDRESS || "";
 export const GAME_VAULT_ADDRESS: string = process.env.NEXT_PUBLIC_GAME_VAULT_ADDRESS || "";
+export const GAME_SETTLEMENT_ADDRESS: string =
+  process.env.NEXT_PUBLIC_GAME_SETTLEMENT_ADDRESS || "";
 
 export const ERC20_ABI = [
   {
@@ -38,13 +42,98 @@ export const ERC20_ABI = [
 export const GAME_VAULT_ABI = [
   {
     type: "function",
+    name: "availableBalanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "lockedBalanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
     name: "deposit",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "amount", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "withdraw",
     stateMutability: "nonpayable",
     inputs: [{ name: "amount", type: "uint256" }],
     outputs: [],
   },
 ] as const;
 
+export const GAME_SETTLEMENT_ABI = [
+  {
+    type: "function",
+    name: "startSession",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "onchainSessionId", type: "bytes32" },
+      { name: "stakeAmount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "settleWithSignature",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "resolution",
+        type: "tuple",
+        components: [
+          { name: "sessionId", type: "bytes32" },
+          { name: "player", type: "address" },
+          { name: "stakeAmount", type: "uint256" },
+          { name: "payoutAmount", type: "uint256" },
+          { name: "finalMultiplierBp", type: "uint256" },
+          { name: "outcome", type: "uint8" },
+          { name: "deadline", type: "uint64" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+export const USDC_FAUCET_ABI = [
+  {
+    type: "function",
+    name: "claimAmount",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "claim",
+    stateMutability: "nonpayable",
+    inputs: [],
+    outputs: [],
+  },
+] as const;
+
 export function hasDepositContractConfig() {
-  return Boolean(isAddress(USDC_ADDRESS) && isAddress(GAME_VAULT_ADDRESS));
+  return Boolean(
+    isAddress(USDC_ADDRESS) &&
+      isAddress(USDC_FAUCET_ADDRESS) &&
+      isAddress(GAME_VAULT_ADDRESS)
+  );
+}
+
+export function hasGameContractConfig() {
+  return Boolean(
+    isAddress(USDC_ADDRESS) &&
+      isAddress(GAME_VAULT_ADDRESS) &&
+      isAddress(GAME_SETTLEMENT_ADDRESS)
+  );
 }

@@ -1,8 +1,14 @@
+import { GameBridgeClient } from "./GameBridgeClient";
 import Script from "next/script";
 
-export function GameCanvas() {
+type GameCanvasProps = {
+  backgroundMode?: boolean;
+};
+
+export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
   return (
     <>
+      <GameBridgeClient backgroundMode={backgroundMode} />
       <canvas className="game" />
 
       <div id="top-bar">

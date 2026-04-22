@@ -29,26 +29,49 @@ export function useBackendDepositFlow(): DepositFlowViewModel {
     canTransact: false,
     hasValidContracts: hasBackendConfig,
     usdcAddress: "",
+    faucetAddress: "",
     vaultAddress: "",
+    faucetClaimAmountDisplay: "-",
     walletBalanceDisplay: "-",
     allowanceDisplay: "-",
+    availableBalanceDisplay: "-",
+    lockedBalanceDisplay: "-",
     isWalletBalanceFetching: false,
     isAllowanceFetching: false,
+    isVaultBalanceFetching: false,
     needsApproval: false,
+    faucetTxHash: "",
+    faucetTxUrl: "",
     approveTxHash: "",
     approveTxUrl: "",
     depositTxHash: "",
     depositTxUrl: "",
+    withdrawTxHash: "",
+    withdrawTxUrl: "",
+    isFaucetBusy: false,
     isApproveBusy: false,
     isDepositBusy: false,
+    isWithdrawBusy: false,
+    disableFaucetButton: true,
     disableApproveButton: true,
     disableDepositButton: true,
+    disableWithdrawButton: true,
+    onClaimFaucet: async () => {
+      throw new Error(
+        `Backend mode belum diimplementasi. Set endpoint di ${BACKEND_API_URL || "frontend/.env.local"}.`
+      );
+    },
     onApprove: async () => {
       throw new Error(
         `Backend mode belum diimplementasi. Set endpoint di ${BACKEND_API_URL || "frontend/.env.local"}.`
       );
     },
     onDeposit: async () => {
+      throw new Error(
+        `Backend mode belum diimplementasi. Set endpoint di ${BACKEND_API_URL || "frontend/.env.local"}.`
+      );
+    },
+    onWithdraw: async () => {
       throw new Error(
         `Backend mode belum diimplementasi. Set endpoint di ${BACKEND_API_URL || "frontend/.env.local"}.`
       );

@@ -2,7 +2,16 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { useAccount, useConnect, useDisconnect, useSwitchChain } from "wagmi";
+import { SiweMessage } from "siwe";
+import {
+  useAccount,
+  useConnect,
+  useDisconnect,
+  useSignMessage,
+  useSwitchChain,
+} from "wagmi";
+import { backendFetch, backendPost } from "../../lib/backend/api";
+import { BACKEND_API_URL, hasBackendApiConfig } from "../../lib/backend/config";
 import { MONAD_CHAIN, hasMonadChainConfig } from "../../lib/web3/monad";
 
 type WalletContextValue = {
@@ -18,6 +27,15 @@ type WalletContextValue = {
   hasMonadChainConfig: boolean;
   monadChainIdHex: string;
   monadChainName: string;
+  backendApiUrl: string;
+  hasBackendApiConfig: boolean;
+  isBackendAuthenticated: boolean;
+  isBackendAuthLoading: boolean;
+  backendAuthError: string;
+  authenticateBackend: () => Promise<boolean>;
+  ensureBackendSession: () => Promise<boolean>;
+  logoutBackend: () => Promise<void>;
+  refreshBackendSession: () => Promise<boolean>;
 };
 
 type WalletProviderProps = {
@@ -77,18 +95,28 @@ function getEip1193Provider() {
 
 export function WalletProvider({ children }: WalletProviderProps) {
   const [error, setError] = useState("");
+  const [backendAddress, setBackendAddress] = useState("");
+  const [backendAuthLoading, setBackendAuthLoading] = useState(false);
+  const [backendAuthError, setBackendAuthError] = useState("");
   const { address, chainId, isConnected } = useAccount();
   const { connectAsync, connectors, isPending: isConnectPending } = useConnect();
   const { disconnect } = useDisconnect();
+  const { signMessageAsync } = useSignMessage();
   const { switchChainAsync, isPending: isSwitchPending } = useSwitchChain();
 
   const chainIdHex = toHexChainId(chainId);
   const account = address || "";
+  const normalizedAccount = account.toLowerCase();
   const hasMonadConfig = hasMonadChainConfig();
+  const hasBackendConfig = hasBackendApiConfig();
   const isMonadChain =
     hasMonadConfig &&
     chainIdHex.toLowerCase() === (MONAD_CHAIN.chainIdHex || "").toLowerCase();
   const isConnecting = isConnectPending || isSwitchPending;
+  const isBackendAuthenticated =
+    Boolean(backendAddress) &&
+    Boolean(normalizedAccount) &&
+    backendAddress.toLowerCase() === normalizedAccount;
 
   async function connectWallet() {
     if (connectors.length === 0) {
@@ -110,6 +138,11 @@ export function WalletProvider({ children }: WalletProviderProps) {
   function disconnectWallet() {
     disconnect();
     setError("");
+    setBackendAddress("");
+    setBackendAuthError("");
+    if (hasBackendConfig) {
+      void logoutBackend();
+    }
   }
 
   async function addMonadChainToWallet() {
@@ -169,11 +202,129 @@ export function WalletProvider({ children }: WalletProviderProps) {
     }
   }
 
+  async function refreshBackendSession() {
+    if (!hasBackendConfig) {
+      setBackendAddress("");
+      return false;
+    }
+
+    setBackendAuthLoading(true);
+    try {
+      const response = await backendFetch<{ authenticated: boolean; address: string }>("/auth/me");
+      const sessionAddress = response.address?.toLowerCase?.() || "";
+      if (!sessionAddress || (normalizedAccount && sessionAddress !== normalizedAccount)) {
+        setBackendAddress("");
+        return false;
+      }
+
+      setBackendAddress(sessionAddress);
+      setBackendAuthError("");
+      return true;
+    } catch {
+      setBackendAddress("");
+      return false;
+    } finally {
+      setBackendAuthLoading(false);
+    }
+  }
+
+  async function authenticateBackend() {
+    if (!hasBackendConfig) {
+      setBackendAuthError("Config backend belum lengkap. Isi NEXT_PUBLIC_BACKEND_API_URL dulu.");
+      return false;
+    }
+    if (!isConnected || !account) {
+      setBackendAuthError("Connect wallet dulu sebelum sign in ke backend.");
+      return false;
+    }
+
+    setBackendAuthLoading(true);
+    setBackendAuthError("");
+
+    try {
+      const { nonce } = await backendFetch<{ nonce: string }>("/auth/nonce");
+      const domain = window.location.host;
+      const origin = window.location.origin;
+      const chainIdToUse = chainId || MONAD_CHAIN.chainIdDecimal || 10143;
+      const statement = "Sign in to Chicken Monad backend.";
+      const siweMessage = new SiweMessage({
+        domain,
+        address: account,
+        statement,
+        uri: origin,
+        version: "1",
+        chainId: chainIdToUse,
+        nonce,
+      });
+      const message = siweMessage.prepareMessage();
+      const signature = await signMessageAsync({ message });
+
+      await backendPost<{ success: boolean; address: string }>("/auth/verify", {
+        message,
+        signature,
+      });
+
+      setBackendAddress(account.toLowerCase());
+      setBackendAuthError("");
+      return true;
+    } catch (authError) {
+      setBackendAddress("");
+      setBackendAuthError(readErrorMessage(authError, "Gagal auth ke backend."));
+      return false;
+    } finally {
+      setBackendAuthLoading(false);
+    }
+  }
+
+  async function ensureBackendSession() {
+    if (!hasBackendConfig) {
+      return false;
+    }
+    if (isBackendAuthenticated) {
+      return true;
+    }
+
+    const hasExistingSession = await refreshBackendSession();
+    if (hasExistingSession) {
+      return true;
+    }
+
+    return authenticateBackend();
+  }
+
+  async function logoutBackend() {
+    if (!hasBackendConfig) {
+      setBackendAddress("");
+      return;
+    }
+
+    try {
+      await backendPost<{ success: boolean }>("/auth/logout");
+    } catch {
+      // Ignore logout failures on local dev; frontend state is still cleared.
+    } finally {
+      setBackendAddress("");
+      setBackendAuthError("");
+      setBackendAuthLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!isConnected) {
       setError("");
+      setBackendAddress("");
+      setBackendAuthError("");
     }
   }, [isConnected]);
+
+  useEffect(() => {
+    if (!hasBackendConfig || !isConnected || !account) {
+      setBackendAddress("");
+      return;
+    }
+
+    void refreshBackendSession();
+  }, [account, hasBackendConfig, isConnected]);
 
   const value = useMemo<WalletContextValue>(
     () => ({
@@ -189,8 +340,28 @@ export function WalletProvider({ children }: WalletProviderProps) {
       hasMonadChainConfig: hasMonadConfig,
       monadChainIdHex: MONAD_CHAIN.chainIdHex,
       monadChainName: MONAD_CHAIN.chainName,
+      backendApiUrl: BACKEND_API_URL,
+      hasBackendApiConfig: hasBackendConfig,
+      isBackendAuthenticated,
+      isBackendAuthLoading: backendAuthLoading,
+      backendAuthError,
+      authenticateBackend,
+      ensureBackendSession,
+      logoutBackend,
+      refreshBackendSession,
     }),
-    [account, chainIdHex, error, hasMonadConfig, isConnecting, isMonadChain]
+    [
+      account,
+      backendAuthError,
+      backendAuthLoading,
+      chainIdHex,
+      error,
+      hasBackendConfig,
+      hasMonadConfig,
+      isBackendAuthenticated,
+      isConnecting,
+      isMonadChain,
+    ]
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
