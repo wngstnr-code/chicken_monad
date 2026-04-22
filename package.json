@@ -1,0 +1,20 @@
+{
+  "name": "chicken-monad",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev frontend",
+    "build": "next build frontend",
+    "start": "next start frontend"
+  },
+  "dependencies": {
+    "next": "^14.2.35",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "25.6.0",
+    "@types/react": "19.2.14",
+    "typescript": "6.0.3"
+  }
+}

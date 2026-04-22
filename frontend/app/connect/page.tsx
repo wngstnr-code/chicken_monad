@@ -1,0 +1,107 @@
+"use client";
+
+import { useWallet } from "../../components/web3/WalletProvider";
+
+function shortAddress(address: string) {
+  if (!address) return "-";
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+export default function ConnectPage() {
+  const {
+    account,
+    chainIdHex,
+    isMonadChain,
+    isConnecting,
+    error,
+    connectWallet,
+    disconnectWallet,
+    switchToMonad,
+    hasMonadChainConfig,
+    monadChainIdHex,
+    monadChainName,
+    clearWalletError,
+  } = useWallet();
+
+  const isConnected = Boolean(account);
+
+  return (
+    <main className="flow-page">
+      <section className="flow-card">
+        <p className="flow-eyebrow">Step 1</p>
+        <h1 className="flow-title">Connect Wallet</h1>
+        <p className="flow-copy">
+          Gunakan halaman ini untuk connect wallet EVM, lalu switch ke chain Monad sebelum
+          deposit USDC.
+        </p>
+
+        <div className="flow-status">
+          <p>
+            Status: <strong>{isConnected ? "Connected" : "Not connected"}</strong>
+          </p>
+          <p>
+            Account: <span className="mono">{shortAddress(account)}</span>
+          </p>
+          <p>
+            Chain: <span className="mono">{chainIdHex || "-"}</span>
+          </p>
+          <p>
+            Monad: <strong>{isMonadChain ? "Yes" : "No"}</strong>
+          </p>
+          <p>
+            Target Chain:{" "}
+            <span className="mono">
+              {monadChainName} {monadChainIdHex || "(set in .env.local)"}
+            </span>
+          </p>
+        </div>
+
+        {!hasMonadChainConfig && (
+          <p className="flow-alert">
+            Config Monad belum lengkap. Isi dulu `.env.local` berdasarkan `.env.example`.
+          </p>
+        )}
+
+        {error && (
+          <p className="flow-alert">
+            {error}{" "}
+            <button className="inline-btn" type="button" onClick={clearWalletError}>
+              clear
+            </button>
+          </p>
+        )}
+
+        <div className="flow-actions">
+          <button className="flow-btn" type="button" onClick={connectWallet} disabled={isConnecting}>
+            {isConnecting ? "Connecting..." : "Connect Wallet"}
+          </button>
+          <button
+            className="flow-btn secondary"
+            type="button"
+            onClick={switchToMonad}
+            disabled={!isConnected}
+          >
+            Switch To Monad
+          </button>
+          <button
+            className="flow-btn secondary"
+            type="button"
+            onClick={disconnectWallet}
+            disabled={!isConnected}
+          >
+            Clear Session
+          </button>
+        </div>
+
+        <div className="flow-actions">
+          <a href="/deposit" className="flow-btn secondary">
+            Continue: Deposit USDC
+          </a>
+          <a href="/play" className="flow-btn secondary">
+            Open Game
+          </a>
+        </div>
+      </section>
+    </main>
+  );
+}

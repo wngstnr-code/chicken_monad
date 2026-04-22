@@ -1,35 +1,56 @@
-# Chicken Cross the Road – 2D Browser Game
+# Chicken Monad
 
-A simple, nostalgic **"Why did the chicken cross the road?"** game built with **pure HTML, CSS, and JavaScript** (no frameworks, no canvas, just DOM + CSS positioning).
+Repo ini sekarang dipisah berdasarkan domain kerja supaya lebih rapih saat scale untuk hackathon Monad:
 
-You control a chicken using the **arrow keys** and try to reach the other side of the road without getting hit by obsticles.
+- `frontend/`: Next.js app (UI, game, wallet flow).
+- `backend/`: placeholder service API/off-chain logic.
+- `smart-contracts/`: placeholder source contract, ABI, deployment data.
 
+## Kenapa sebelumnya JSX?
 
-## 🎮 How to Play
+Awalnya dipakai JSX karena tahap awal fokusnya cepat pindah dari HTML ke App Router tanpa nambah kompleksitas typing. Sekarang frontend sudah dimigrasi ke TSX/TS agar flow Web3 lebih aman dan maintainable.
 
-- Use **↑ ↓ ← →** arrow keys to move the chicken
-- Reach the **top** of the screen = you win the level
-- Touch any vehicle = game over
-- The more levels you pass, the faster and more vehicles appear
+## Menjalankan Frontend
 
-## ✨ Features
+1. Install dependencies:
 
-- Pure vanilla JavaScript (no libraries)
-- DOM-based movement & collision detection
-- Increasing difficulty (speed & vehicle count)
-- Score tracking (endless game)
-- Simple start / game-over / restart screen
-- Mobile-friendly touch controls (optional – coming soon)
-- Retro pixel-art / cartoon style (made with CSS)
+```bash
+npm install
+```
 
+2. Run dev:
 
+```bash
+npm run dev
+```
 
+3. Build:
 
-<div align="center">
-<h1>🚀 Play Now</h1>
+```bash
+npm run build
+```
 
-<h3>If you want to play this game, click the button below:</h3>
+## Konfigurasi Frontend Env
 
-[![Explore Now](https://img.shields.io/badge/🚀%20Play%20Now-4285F4?style=for-the-badge&logo=vercel&logoColor=white)](https://crossing-the-road.vercel.app/)
+Copy file:
 
+```bash
+frontend/.env.example -> frontend/.env.local
+```
 
+Isi minimal:
+
+- `NEXT_PUBLIC_MONAD_CHAIN_ID`
+- `NEXT_PUBLIC_MONAD_RPC_URLS`
+- `NEXT_PUBLIC_MONAD_EXPLORER_URLS`
+- `NEXT_PUBLIC_USDC_ADDRESS`
+- `NEXT_PUBLIC_GAME_VAULT_ADDRESS`
+
+## Struktur Frontend Penting
+
+- `frontend/app/connect/page.tsx`: connect wallet + switch chain
+- `frontend/app/deposit/page.tsx`: kerangka deposit USDC
+- `frontend/app/play/page.tsx`: halaman game
+- `frontend/components/game/GameCanvas.tsx`: komponen game
+- `frontend/components/web3/WalletProvider.tsx`: global wallet state
+- `frontend/lib/web3/*`: config chain dan contract
