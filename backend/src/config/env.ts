@@ -38,12 +38,16 @@ export const env = {
 
   // Smart Contract
   GAME_VAULT_ADDRESS: optionalEnv("GAME_VAULT_ADDRESS", "0x0000000000000000000000000000000000000000"),
+  GAME_SETTLEMENT_ADDRESS: optionalEnv("GAME_SETTLEMENT_ADDRESS", "0x0000000000000000000000000000000000000000"),
 
   // Backend Signer
   BACKEND_PRIVATE_KEY: optionalEnv(
     "BACKEND_PRIVATE_KEY",
     "0x0000000000000000000000000000000000000000000000000000000000000000"
   ),
+
+  // Settlement
+  SETTLEMENT_SIGNATURE_TTL_SECONDS: parseInt(optionalEnv("SETTLEMENT_SIGNATURE_TTL_SECONDS", "86400"), 10),
 } as const;
 
 // Log config status on import (non-sensitive)
@@ -54,3 +58,4 @@ console.log(`   Supabase: ${env.SUPABASE_URL.replace(/https?:\/\//, "").substrin
 console.log(`   Monad RPC: ${env.MONAD_RPC_URL}`);
 console.log(`   Chain ID: ${env.MONAD_CHAIN_ID}`);
 console.log(`   Vault: ${env.GAME_VAULT_ADDRESS.substring(0, 10)}...`);
+console.log(`   Settlement: ${env.GAME_SETTLEMENT_ADDRESS.substring(0, 10)}...`);

@@ -1,28 +1,40 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { supabase } from "../config/supabase.js";
 import { hasActiveGame } from "../services/gameState.js";
+import { usdcToUint256 } from "../services/signatureService.js";
 
 const router = Router();
 
-/**
- * GET /api/game/active
- * Check if the player has an active game session.
- * Used by frontend to prevent opening multiple tabs.
- */
-router.get("/active", requireAuth, async (req, res) => {
+function buildResolutionFromSession(walletAddress: string, session: Record<string, unknown>) {
+  const stakeAmount = Number(session.stake_amount ?? 0);
+  const payoutAmount = Number(session.payout_amount ?? 0);
+  const finalMultiplier = Number(session.final_multiplier ?? 0);
+  const finalMultiplierBp = Math.round(finalMultiplier * 10_000);
+  const status = String(session.status ?? "");
+
+  return {
+    sessionId: String(session.onchain_session_id),
+    player: walletAddress,
+    stakeAmount: usdcToUint256(stakeAmount).toString(),
+    payoutAmount: usdcToUint256(payoutAmount).toString(),
+    finalMultiplierBp: status === "CRASHED" ? "0" : finalMultiplierBp.toString(),
+    outcome: status === "CRASHED" ? 2 : 1,
+    deadline: String(session.settlement_deadline ?? "0"),
+  };
+}
+
+router.get("/active", requireAuth, async (req: Request, res: Response) => {
   const walletAddress = req.walletAddress!;
 
-  // Check in-memory first (fastest)
   if (hasActiveGame(walletAddress)) {
     res.json({ hasActiveGame: true });
     return;
   }
 
-  // Also check database for stale sessions
   const { data } = await supabase
     .from("game_sessions")
-    .select("session_id, stake_amount, created_at")
+    .select("session_id, onchain_session_id, stake_amount, created_at")
     .eq("wallet_address", walletAddress)
     .eq("status", "ACTIVE")
     .maybeSingle();
@@ -33,40 +45,44 @@ router.get("/active", requireAuth, async (req, res) => {
   });
 });
 
-/**
- * GET /api/game/pending-claim
- * Check if the player has a pending claim signature.
- * Used for session recovery (e.g., browser closed before MetaMask confirm).
- */
-router.get("/pending-claim", requireAuth, async (req, res) => {
+async function getPendingSettlements(req: Request, res: Response) {
   const walletAddress = req.walletAddress!;
 
   const { data, error } = await supabase
     .from("game_sessions")
-    .select("session_id, stake_amount, final_multiplier, payout_amount, claim_signature, ended_at")
+    .select(
+      "session_id, onchain_session_id, stake_amount, status, final_multiplier, payout_amount, settlement_signature, settlement_deadline, settlement_tx_hash, ended_at"
+    )
     .eq("wallet_address", walletAddress)
-    .eq("status", "CASHED_OUT")
-    .not("claim_signature", "is", null)
+    .in("status", ["CASHED_OUT", "CRASHED"])
+    .not("settlement_signature", "is", null)
+    .is("settlement_tx_hash", null)
     .order("ended_at", { ascending: false })
     .limit(5);
 
   if (error) {
-    console.error("❌ Error fetching pending claims:", error);
-    res.status(500).json({ error: "Failed to fetch pending claims." });
+    console.error("❌ Error fetching pending settlements:", error);
+    res.status(500).json({ error: "Failed to fetch pending settlements." });
     return;
   }
 
-  res.json({
-    pendingClaims: data || [],
-    hasPending: (data?.length ?? 0) > 0,
-  });
-});
+  const pendingSettlements = (data || []).map((session: Record<string, unknown>) => ({
+    ...session,
+    resolution: buildResolutionFromSession(walletAddress, session),
+    signature: session.settlement_signature,
+  }));
 
-/**
- * GET /api/game/history
- * Get player's game session history.
- */
-router.get("/history", requireAuth, async (req, res) => {
+  res.json({
+    pendingSettlements,
+    pendingClaims: pendingSettlements,
+    hasPending: pendingSettlements.length > 0,
+  });
+}
+
+router.get("/pending-settlement", requireAuth, getPendingSettlements);
+router.get("/pending-claim", requireAuth, getPendingSettlements);
+
+router.get("/history", requireAuth, async (req: Request, res: Response) => {
   const walletAddress = req.walletAddress!;
   const limit = Math.min(parseInt(String(req.query.limit ?? "20")), 100);
   const offset = parseInt(String(req.query.offset ?? "0"));
@@ -93,24 +109,18 @@ router.get("/history", requireAuth, async (req, res) => {
   });
 });
 
-/**
- * POST /api/game/clear-claim
- * Mark a claim as processed (after SC transaction confirmed).
- * Frontend calls this after MetaMask tx succeeds.
- */
-router.post("/clear-claim", requireAuth, async (req, res) => {
+async function clearSettlement(req: Request, res: Response) {
   const walletAddress = req.walletAddress!;
-  const { sessionId, txHash } = req.body;
+  const { sessionId, txHash } = req.body as { sessionId?: string; txHash?: string };
 
-  if (!sessionId) {
-    res.status(400).json({ error: "Missing sessionId." });
+  if (!sessionId || !txHash) {
+    res.status(400).json({ error: "Missing sessionId or txHash." });
     return;
   }
 
-  // Verify session belongs to player
   const { data: session } = await supabase
     .from("game_sessions")
-    .select("session_id, wallet_address, claim_signature")
+    .select("session_id, wallet_address, settlement_signature")
     .eq("session_id", sessionId)
     .eq("wallet_address", walletAddress)
     .single();
@@ -120,26 +130,15 @@ router.post("/clear-claim", requireAuth, async (req, res) => {
     return;
   }
 
-  // Clear the claim signature (mark as claimed)
   await supabase
     .from("game_sessions")
-    .update({ claim_signature: null })
+    .update({ settlement_tx_hash: txHash })
     .eq("session_id", sessionId);
 
-  // If tx hash provided, log the transaction
-  if (txHash) {
-    await supabase.from("transactions").upsert(
-      {
-        tx_hash: txHash,
-        wallet_address: walletAddress,
-        type: "CLAIM_REWARD",
-        amount: 0, // Will be updated by blockchain listener
-      },
-      { onConflict: "tx_hash" }
-    );
-  }
-
   res.json({ success: true });
-});
+}
+
+router.post("/clear-settlement", requireAuth, clearSettlement);
+router.post("/clear-claim", requireAuth, clearSettlement);
 
 export default router;

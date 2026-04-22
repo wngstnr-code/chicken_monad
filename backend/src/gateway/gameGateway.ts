@@ -4,18 +4,52 @@ import { v4 as uuidv4 } from "uuid";
 import { getWalletFromSocketCookies } from "../middleware/auth.js";
 import { env } from "../config/env.js";
 import { supabase } from "../config/supabase.js";
-import { STEP_INCREMENT_BP, CP_BONUS_NUM, CP_BONUS_DEN, MIN_STAKE, MAX_STAKE, GRACE_PERIOD_MS } from "../config/constants.js";
-import { createGameState, getGameByWallet, removeGameState, hasActiveGame, getAllActiveGames, type ActiveGameState } from "../services/gameState.js";
-import { isMoveToFast, isSpeedHack, getEffectiveMultiplierBp, calculatePayout, isCheckpointRow } from "../services/gameValidator.js";
-import { onReachCheckpoint, onLeaveCheckpoint, isCpStayExpired, getSegmentRemainingMs as timerGetSegmentRemainingMs, getCurrentDecayBp, getCpStayRemainingMs } from "../services/timerAuthority.js";
-import { signPayout } from "../services/signatureService.js";
+import {
+  STEP_INCREMENT_BP,
+  CP_BONUS_NUM,
+  CP_BONUS_DEN,
+  MIN_STAKE,
+  MAX_STAKE,
+  GRACE_PERIOD_MS,
+} from "../config/constants.js";
+import {
+  createGameState,
+  getGameByWallet,
+  removeGameState,
+  hasActiveGame,
+  getAllActiveGames,
+  type ActiveGameState,
+} from "../services/gameState.js";
+import {
+  isMoveToFast,
+  isSpeedHack,
+  getEffectiveMultiplierBp,
+  calculatePayout,
+  isCheckpointRow,
+} from "../services/gameValidator.js";
+import {
+  onReachCheckpoint,
+  onLeaveCheckpoint,
+  isCpStayExpired,
+  getSegmentRemainingMs as timerGetSegmentRemainingMs,
+  getCurrentDecayBp,
+  getCpStayRemainingMs,
+} from "../services/timerAuthority.js";
+import {
+  SETTLEMENT_OUTCOME,
+  generateOnchainSessionId,
+  signSettlement,
+  usdcToUint256,
+} from "../services/signatureService.js";
 
 let io: SocketServer;
 
 export function setupGameGateway(httpServer: HttpServer): SocketServer {
   io = new SocketServer(httpServer, {
     cors: { origin: env.FRONTEND_URL, credentials: true },
-    allowRequest: (req, callback) => { callback(null, true); },
+    allowRequest: (_req, callback) => {
+      callback(null, true);
+    },
   });
 
   io.on("connection", (socket: Socket) => {
@@ -34,11 +68,21 @@ export function setupGameGateway(httpServer: HttpServer): SocketServer {
       return;
     }
 
-    socket.on("game:start", async (data: { stake: number }) => { await handleGameStart(socket, walletAddress, data.stake); });
-    socket.on("game:move", (data: { direction: string }) => { handleGameMove(socket, walletAddress, data.direction); });
-    socket.on("game:crash", () => { handleGameCrash(socket, walletAddress, "client_reported"); });
-    socket.on("game:cashout", async () => { await handleGameCashout(socket, walletAddress); });
-    socket.on("disconnect", (reason: string) => { handleDisconnect(walletAddress, reason); });
+    socket.on("game:start", async (data: { stake: number }) => {
+      await handleGameStart(socket, walletAddress, data.stake);
+    });
+    socket.on("game:move", (data: { direction: string }) => {
+      handleGameMove(socket, walletAddress, data.direction);
+    });
+    socket.on("game:crash", () => {
+      void handleGameCrash(socket, walletAddress, "client_reported");
+    });
+    socket.on("game:cashout", async () => {
+      await handleGameCashout(socket, walletAddress);
+    });
+    socket.on("disconnect", (reason: string) => {
+      handleDisconnect(walletAddress, reason);
+    });
   });
 
   setInterval(checkCpStayTimeouts, 1000);
@@ -48,7 +92,9 @@ export function setupGameGateway(httpServer: HttpServer): SocketServer {
 
 async function handleGameStart(socket: Socket, walletAddress: string, stake: number): Promise<void> {
   if (!stake || !isFinite(stake) || stake < MIN_STAKE || stake > MAX_STAKE) {
-    socket.emit("game:error", { message: `Invalid stake. Must be between $${MIN_STAKE} and $${MAX_STAKE}.` });
+    socket.emit("game:error", {
+      message: `Invalid stake. Must be between $${MIN_STAKE} and $${MAX_STAKE}.`,
+    });
     return;
   }
   if (hasActiveGame(walletAddress)) {
@@ -56,35 +102,84 @@ async function handleGameStart(socket: Socket, walletAddress: string, stake: num
     return;
   }
 
-  // Clean stale DB sessions
-  const { data: stale } = await supabase.from("game_sessions").select("session_id").eq("wallet_address", walletAddress).eq("status", "ACTIVE").maybeSingle();
-  if (stale) await supabase.from("game_sessions").update({ status: "CRASHED", ended_at: new Date().toISOString() }).eq("session_id", stale.session_id);
+  const { data: stale } = await supabase
+    .from("game_sessions")
+    .select("session_id")
+    .eq("wallet_address", walletAddress)
+    .eq("status", "ACTIVE")
+    .maybeSingle();
+
+  if (stale) {
+    await supabase
+      .from("game_sessions")
+      .update({ status: "CRASHED", ended_at: new Date().toISOString() })
+      .eq("session_id", stale.session_id);
+  }
 
   const sessionId = uuidv4();
-  const { error: dbError } = await supabase.from("game_sessions").insert({ session_id: sessionId, wallet_address: walletAddress, stake_amount: stake, status: "ACTIVE" });
-  if (dbError) { socket.emit("game:error", { message: "Failed to start game." }); return; }
+  const onchainSessionId = generateOnchainSessionId();
 
-  // Increment total_games
-  const { data: player } = await supabase.from("players").select("total_games").eq("wallet_address", walletAddress).single();
-  if (player) await supabase.from("players").update({ total_games: player.total_games + 1 }).eq("wallet_address", walletAddress);
+  const { error: dbError } = await supabase.from("game_sessions").insert({
+    session_id: sessionId,
+    onchain_session_id: onchainSessionId,
+    wallet_address: walletAddress,
+    stake_amount: stake,
+    status: "ACTIVE",
+  });
 
-  createGameState(sessionId, walletAddress, stake, socket.id);
+  if (dbError) {
+    socket.emit("game:error", { message: "Failed to start game." });
+    return;
+  }
+
+  const { data: player } = await supabase
+    .from("players")
+    .select("total_games")
+    .eq("wallet_address", walletAddress)
+    .single();
+
+  if (player) {
+    await supabase
+      .from("players")
+      .update({ total_games: player.total_games + 1 })
+      .eq("wallet_address", walletAddress);
+  }
+
+  createGameState(sessionId, onchainSessionId, walletAddress, stake, socket.id);
+
   const mapSeed = Math.floor(Math.random() * 999999);
-  console.log(`🎮 Game started: ${walletAddress} | Stake: $${stake} | Session: ${sessionId}`);
-  socket.emit("game:started", { sessionId, stake, mapSeed, serverTime: Date.now() });
+  const stakeAmountUnits = usdcToUint256(stake).toString();
+
+  console.log(`🎮 Game started: ${walletAddress} | Stake: $${stake} | Session: ${sessionId} | Onchain: ${onchainSessionId}`);
+  socket.emit("game:started", {
+    sessionId,
+    onchainSessionId,
+    stake,
+    stakeAmountUnits,
+    mapSeed,
+    serverTime: Date.now(),
+  });
 }
 
 function handleGameMove(socket: Socket, walletAddress: string, direction: string): void {
   const state = getGameByWallet(walletAddress);
-  if (!state) { socket.emit("game:error", { message: "No active game session." }); return; }
+  if (!state) {
+    socket.emit("game:error", { message: "No active game session." });
+    return;
+  }
+
   const now = Date.now();
 
-  if (isMoveToFast(state.lastMoveTime, now)) console.warn(`⚠️ Fast move: ${walletAddress} (${now - state.lastMoveTime}ms)`);
+  if (isMoveToFast(state.lastMoveTime, now)) {
+    console.warn(`⚠️ Fast move: ${walletAddress} (${now - state.lastMoveTime}ms)`);
+  }
   state.moveTimestamps.push(now);
-  if (state.moveTimestamps.length > 50) state.moveTimestamps = state.moveTimestamps.slice(-50);
+  if (state.moveTimestamps.length > 50) {
+    state.moveTimestamps = state.moveTimestamps.slice(-50);
+  }
   if (isSpeedHack(state.moveTimestamps)) {
     console.error(`🚨 SPEED HACK: ${walletAddress}`);
-    handleGameCrash(socket, walletAddress, "speedhack_detected");
+    void handleGameCrash(socket, walletAddress, "speedhack_detected");
     return;
   }
   state.lastMoveTime = now;
@@ -101,9 +196,12 @@ function handleGameMove(socket: Socket, walletAddress: string, direction: string
         state.cashoutWindow = true;
         state.cpRowIndex = state.currentRow;
         state.isAtCheckpoint = true;
-        console.log(`🏁 CP ${state.currentCp} by ${walletAddress} row ${state.currentRow} | ${(state.multiplierBp / 10000).toFixed(4)}x`);
+        console.log(
+          `🏁 CP ${state.currentCp} by ${walletAddress} row ${state.currentRow} | ${(state.multiplierBp / 10000).toFixed(4)}x`
+        );
       }
     }
+
     if (state.cashoutWindow && state.currentRow > state.cpRowIndex) {
       state.cashoutWindow = false;
       state.isAtCheckpoint = false;
@@ -118,34 +216,110 @@ function handleGameMove(socket: Socket, walletAddress: string, direction: string
     }
   }
 
-  const effectiveMultBp = state.timer.segmentActive ? getEffectiveMultiplierBp(state.multiplierBp, state.timer.segmentStart, now) : state.multiplierBp;
+  const effectiveMultBp = state.timer.segmentActive
+    ? getEffectiveMultiplierBp(state.multiplierBp, state.timer.segmentStart, now)
+    : state.multiplierBp;
+
   socket.emit("game:state", {
-    row: state.currentRow, maxRow: state.maxRow, multiplierBp: effectiveMultBp,
-    multiplier: (effectiveMultBp / 10000).toFixed(4), cp: state.currentCp, cashoutWindow: state.cashoutWindow,
+    row: state.currentRow,
+    maxRow: state.maxRow,
+    multiplierBp: effectiveMultBp,
+    multiplier: (effectiveMultBp / 10000).toFixed(4),
+    cp: state.currentCp,
+    cashoutWindow: state.cashoutWindow,
     segmentRemainingMs: timerGetSegmentRemainingMs(state.timer, now),
     cpStayRemainingMs: getCpStayRemainingMs(state.timer, now),
-    decayBp: getCurrentDecayBp(state.timer, now), serverTime: now,
+    decayBp: getCurrentDecayBp(state.timer, now),
+    serverTime: now,
   });
 }
 
-async function handleGameCrash(socket: Socket | null, walletAddress: string, reason: string): Promise<void> {
+async function handleGameCrash(
+  socket: Socket | null,
+  walletAddress: string,
+  reason: string
+): Promise<void> {
   const state = getGameByWallet(walletAddress);
-  if (!state) return;
-  const effectiveMultBp = state.timer.segmentActive ? getEffectiveMultiplierBp(state.multiplierBp, state.timer.segmentStart, Date.now()) : state.multiplierBp;
+  if (!state) {
+    return;
+  }
+
+  const effectiveMultBp = state.timer.segmentActive
+    ? getEffectiveMultiplierBp(state.multiplierBp, state.timer.segmentStart, Date.now())
+    : state.multiplierBp;
+
   console.log(`💀 CRASHED: ${walletAddress} | Row: ${state.maxRow} | Reason: ${reason}`);
 
-  await supabase.from("game_sessions").update({ status: "CRASHED", max_row_reached: state.maxRow, final_multiplier: effectiveMultBp / 10000, payout_amount: 0, ended_at: new Date().toISOString() }).eq("session_id", state.sessionId);
-  const { data: player } = await supabase.from("players").select("total_losses, total_profit").eq("wallet_address", walletAddress).single();
-  if (player) await supabase.from("players").update({ total_losses: player.total_losses + 1, total_profit: player.total_profit - state.stake }).eq("wallet_address", walletAddress);
+  let settlementResult = null;
+  try {
+    settlementResult = await signSettlement({
+      playerAddress: walletAddress,
+      onchainSessionId: state.onchainSessionId,
+      stakeAmount: state.stake,
+      payoutAmount: 0,
+      finalMultiplierBp: 0,
+      outcome: SETTLEMENT_OUTCOME.CRASHED,
+    });
+  } catch (err) {
+    console.error("❌ Crash settlement sign failed:", err);
+  }
 
-  if (socket) socket.emit("game:crashed", { reason, finalRow: state.maxRow, multiplier: (effectiveMultBp / 10000).toFixed(4), stakeLost: state.stake });
+  await supabase
+    .from("game_sessions")
+    .update({
+      status: "CRASHED",
+      max_row_reached: state.maxRow,
+      final_multiplier: effectiveMultBp / 10000,
+      payout_amount: 0,
+      settlement_signature: settlementResult?.signature ?? null,
+      settlement_deadline: settlementResult?.resolution.deadline ?? null,
+      settlement_tx_hash: null,
+      ended_at: new Date().toISOString(),
+    })
+    .eq("session_id", state.sessionId);
+
+  const { data: player } = await supabase
+    .from("players")
+    .select("total_losses, total_profit")
+    .eq("wallet_address", walletAddress)
+    .single();
+
+  if (player) {
+    await supabase
+      .from("players")
+      .update({
+        total_losses: player.total_losses + 1,
+        total_profit: player.total_profit - state.stake,
+      })
+      .eq("wallet_address", walletAddress);
+  }
+
+  if (socket) {
+    socket.emit("game:crashed", {
+      reason,
+      finalRow: state.maxRow,
+      multiplier: (effectiveMultBp / 10000).toFixed(4),
+      stakeLost: state.stake,
+      onchainSessionId: state.onchainSessionId,
+      settlementSignature: settlementResult?.signature ?? null,
+      resolution: settlementResult?.resolution ?? null,
+      signerAddress: settlementResult?.signerAddress ?? null,
+    });
+  }
+
   removeGameState(walletAddress);
 }
 
 async function handleGameCashout(socket: Socket, walletAddress: string): Promise<void> {
   const state = getGameByWallet(walletAddress);
-  if (!state) { socket.emit("game:error", { message: "No active game session." }); return; }
-  if (!state.cashoutWindow) { socket.emit("game:error", { message: "Must be at checkpoint to cash out." }); return; }
+  if (!state) {
+    socket.emit("game:error", { message: "No active game session." });
+    return;
+  }
+  if (!state.cashoutWindow) {
+    socket.emit("game:error", { message: "Must be at checkpoint to cash out." });
+    return;
+  }
 
   const finalMultiplierBp = state.multiplierBp;
   const finalMultiplier = finalMultiplierBp / 10000;
@@ -153,31 +327,82 @@ async function handleGameCashout(socket: Socket, walletAddress: string): Promise
   const profit = payoutAmount - state.stake;
   console.log(`💰 CASH OUT: ${walletAddress} | ${finalMultiplier.toFixed(4)}x | $${payoutAmount.toFixed(2)}`);
 
-  let signatureResult;
-  try { signatureResult = await signPayout(walletAddress, state.sessionId, finalMultiplierBp, payoutAmount); }
-  catch (err) { console.error("❌ Sign failed:", err); socket.emit("game:error", { message: "Failed to sign payout." }); return; }
+  let settlementResult;
+  try {
+    settlementResult = await signSettlement({
+      playerAddress: walletAddress,
+      onchainSessionId: state.onchainSessionId,
+      stakeAmount: state.stake,
+      payoutAmount,
+      finalMultiplierBp,
+      outcome: SETTLEMENT_OUTCOME.CASHED_OUT,
+    });
+  } catch (err) {
+    console.error("❌ Sign failed:", err);
+    socket.emit("game:error", { message: "Failed to sign settlement." });
+    return;
+  }
 
-  await supabase.from("game_sessions").update({ status: "CASHED_OUT", max_row_reached: state.maxRow, final_multiplier: finalMultiplier, payout_amount: payoutAmount, claim_signature: signatureResult.signature, ended_at: new Date().toISOString() }).eq("session_id", state.sessionId);
-  const { data: player } = await supabase.from("players").select("total_wins, total_profit").eq("wallet_address", walletAddress).single();
-  if (player) await supabase.from("players").update({ total_wins: player.total_wins + 1, total_profit: player.total_profit + profit }).eq("wallet_address", walletAddress);
+  await supabase
+    .from("game_sessions")
+    .update({
+      status: "CASHED_OUT",
+      max_row_reached: state.maxRow,
+      final_multiplier: finalMultiplier,
+      payout_amount: payoutAmount,
+      settlement_signature: settlementResult.signature,
+      settlement_deadline: settlementResult.resolution.deadline,
+      settlement_tx_hash: null,
+      ended_at: new Date().toISOString(),
+    })
+    .eq("session_id", state.sessionId);
 
-  socket.emit("game:cashout_result", { sessionId: state.sessionId, multiplier: finalMultiplier.toFixed(4), payoutAmount: payoutAmount.toFixed(2), profit: profit.toFixed(2), signature: signatureResult.signature, payload: signatureResult.payload, signerAddress: signatureResult.signerAddress });
+  const { data: player } = await supabase
+    .from("players")
+    .select("total_wins, total_profit")
+    .eq("wallet_address", walletAddress)
+    .single();
+
+  if (player) {
+    await supabase
+      .from("players")
+      .update({
+        total_wins: player.total_wins + 1,
+        total_profit: player.total_profit + profit,
+      })
+      .eq("wallet_address", walletAddress);
+  }
+
+  socket.emit("game:cashout_result", {
+    sessionId: state.sessionId,
+    onchainSessionId: state.onchainSessionId,
+    multiplier: finalMultiplier.toFixed(4),
+    payoutAmount: payoutAmount.toFixed(2),
+    profit: profit.toFixed(2),
+    settlementSignature: settlementResult.signature,
+    resolution: settlementResult.resolution,
+    signature: settlementResult.signature,
+    payload: settlementResult.resolution,
+    signerAddress: settlementResult.signerAddress,
+  });
+
   removeGameState(walletAddress);
 }
 
 function handleDisconnect(walletAddress: string, reason: string): void {
   const state = getGameByWallet(walletAddress);
-  if (!state) { console.log(`🔌 Disconnected: ${walletAddress} (no game)`); return; }
+  if (!state) {
+    console.log(`🔌 Disconnected: ${walletAddress} (no game)`);
+    return;
+  }
   console.log(`⚡ Disconnect: ${walletAddress} | Reason: ${reason} | At CP: ${state.isAtCheckpoint}`);
 
-  // Scenario B: At Checkpoint — Auto Cash Out
   if (state.isAtCheckpoint && state.cashoutWindow) {
     console.log(`🔄 Auto cash-out at CP: ${walletAddress}`);
-    handleAutoCashout(walletAddress);
+    void handleAutoCashout(walletAddress);
     return;
   }
 
-  // Scenario A: In Danger — Grace Period
   state.isPaused = true;
   state.pauseStart = Date.now();
   state.disconnectTimer = setTimeout(async () => {
@@ -189,49 +414,123 @@ function handleDisconnect(walletAddress: string, reason: string): void {
 
 function handleReconnect(socket: Socket, walletAddress: string, state: ActiveGameState): void {
   console.log(`🔄 Reconnected: ${walletAddress} (paused ${Date.now() - state.pauseStart}ms)`);
-  if (state.disconnectTimer) { clearTimeout(state.disconnectTimer); state.disconnectTimer = null; }
+  if (state.disconnectTimer) {
+    clearTimeout(state.disconnectTimer);
+    state.disconnectTimer = null;
+  }
   state.isPaused = false;
   state.socketId = socket.id;
-  if (state.timer.segmentActive) state.timer.segmentStart += Date.now() - state.pauseStart;
+  if (state.timer.segmentActive) {
+    state.timer.segmentStart += Date.now() - state.pauseStart;
+  }
 
-  const effectiveMultBp = state.timer.segmentActive ? getEffectiveMultiplierBp(state.multiplierBp, state.timer.segmentStart, Date.now()) : state.multiplierBp;
-  socket.emit("game:reconnected", { sessionId: state.sessionId, stake: state.stake, row: state.currentRow, maxRow: state.maxRow, multiplierBp: effectiveMultBp, multiplier: (effectiveMultBp / 10000).toFixed(4), cp: state.currentCp, cashoutWindow: state.cashoutWindow, segmentRemainingMs: timerGetSegmentRemainingMs(state.timer), serverTime: Date.now() });
+  const effectiveMultBp = state.timer.segmentActive
+    ? getEffectiveMultiplierBp(state.multiplierBp, state.timer.segmentStart, Date.now())
+    : state.multiplierBp;
 
-  socket.on("game:move", (data: { direction: string }) => { handleGameMove(socket, walletAddress, data.direction); });
-  socket.on("game:crash", () => { handleGameCrash(socket, walletAddress, "client_reported"); });
-  socket.on("game:cashout", async () => { await handleGameCashout(socket, walletAddress); });
-  socket.on("disconnect", (reason: string) => { handleDisconnect(walletAddress, reason); });
+  socket.emit("game:reconnected", {
+    sessionId: state.sessionId,
+    onchainSessionId: state.onchainSessionId,
+    stake: state.stake,
+    stakeAmountUnits: usdcToUint256(state.stake).toString(),
+    row: state.currentRow,
+    maxRow: state.maxRow,
+    multiplierBp: effectiveMultBp,
+    multiplier: (effectiveMultBp / 10000).toFixed(4),
+    cp: state.currentCp,
+    cashoutWindow: state.cashoutWindow,
+    segmentRemainingMs: timerGetSegmentRemainingMs(state.timer),
+    serverTime: Date.now(),
+  });
+
+  socket.on("game:move", (data: { direction: string }) => {
+    handleGameMove(socket, walletAddress, data.direction);
+  });
+  socket.on("game:crash", () => {
+    void handleGameCrash(socket, walletAddress, "client_reported");
+  });
+  socket.on("game:cashout", async () => {
+    await handleGameCashout(socket, walletAddress);
+  });
+  socket.on("disconnect", (reason: string) => {
+    handleDisconnect(walletAddress, reason);
+  });
 }
 
 async function handleAutoCashout(walletAddress: string): Promise<void> {
   const state = getGameByWallet(walletAddress);
-  if (!state) return;
+  if (!state) {
+    return;
+  }
+
   const finalMultiplierBp = state.multiplierBp;
   const finalMultiplier = finalMultiplierBp / 10000;
   const payoutAmount = calculatePayout(state.stake, finalMultiplierBp);
   const profit = payoutAmount - state.stake;
   console.log(`🤖 AUTO CASH OUT: ${walletAddress} | ${finalMultiplier.toFixed(4)}x | $${payoutAmount.toFixed(2)}`);
 
-  let signatureResult;
-  try { signatureResult = await signPayout(walletAddress, state.sessionId, finalMultiplierBp, payoutAmount); }
-  catch { await handleGameCrash(null, walletAddress, "auto_cashout_sign_failed"); return; }
+  let settlementResult;
+  try {
+    settlementResult = await signSettlement({
+      playerAddress: walletAddress,
+      onchainSessionId: state.onchainSessionId,
+      stakeAmount: state.stake,
+      payoutAmount,
+      finalMultiplierBp,
+      outcome: SETTLEMENT_OUTCOME.CASHED_OUT,
+    });
+  } catch {
+    await handleGameCrash(null, walletAddress, "auto_cashout_sign_failed");
+    return;
+  }
 
-  await supabase.from("game_sessions").update({ status: "CASHED_OUT", max_row_reached: state.maxRow, final_multiplier: finalMultiplier, payout_amount: payoutAmount, claim_signature: signatureResult.signature, ended_at: new Date().toISOString() }).eq("session_id", state.sessionId);
-  const { data: player } = await supabase.from("players").select("total_wins, total_profit").eq("wallet_address", walletAddress).single();
-  if (player) await supabase.from("players").update({ total_wins: player.total_wins + 1, total_profit: player.total_profit + profit }).eq("wallet_address", walletAddress);
+  await supabase
+    .from("game_sessions")
+    .update({
+      status: "CASHED_OUT",
+      max_row_reached: state.maxRow,
+      final_multiplier: finalMultiplier,
+      payout_amount: payoutAmount,
+      settlement_signature: settlementResult.signature,
+      settlement_deadline: settlementResult.resolution.deadline,
+      settlement_tx_hash: null,
+      ended_at: new Date().toISOString(),
+    })
+    .eq("session_id", state.sessionId);
+
+  const { data: player } = await supabase
+    .from("players")
+    .select("total_wins, total_profit")
+    .eq("wallet_address", walletAddress)
+    .single();
+
+  if (player) {
+    await supabase
+      .from("players")
+      .update({
+        total_wins: player.total_wins + 1,
+        total_profit: player.total_profit + profit,
+      })
+      .eq("wallet_address", walletAddress);
+  }
+
   removeGameState(walletAddress);
 }
 
 function checkCpStayTimeouts(): void {
   for (const state of getAllActiveGames()) {
-    if (!state.cashoutWindow || state.isPaused) continue;
+    if (!state.cashoutWindow || state.isPaused) {
+      continue;
+    }
     if (isCpStayExpired(state.timer)) {
       console.log(`⏰ CP stay expired: ${state.walletAddress}`);
       state.cashoutWindow = false;
       state.isAtCheckpoint = false;
       state.timer = onLeaveCheckpoint(state.timer);
       const socket = io?.sockets.sockets.get(state.socketId);
-      if (socket) socket.emit("game:cp_expired", { message: "Checkpoint time expired. Keep moving!" });
+      if (socket) {
+        socket.emit("game:cp_expired", { message: "Checkpoint time expired. Keep moving!" });
+      }
     }
   }
 }

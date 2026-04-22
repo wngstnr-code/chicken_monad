@@ -74,9 +74,9 @@ npm start
 | Method | Endpoint                  | Auth | Description               |
 | ------ | ------------------------- | ---- | ------------------------- |
 | GET    | `/api/game/active`        | 🔒   | Check for active session  |
-| GET    | `/api/game/pending-claim` | 🔒   | Get pending payout claims |
-| GET    | `/api/game/history`       | 🔒   | Game history              |
-| POST   | `/api/game/clear-claim`   | 🔒   | Mark claim as processed   |
+| GET    | `/api/game/pending-settlement` | 🔒   | Get pending onchain settlements |
+| GET    | `/api/game/history`            | 🔒   | Game history                    |
+| POST   | `/api/game/clear-settlement`   | 🔒   | Mark settlement tx as processed |
 
 ### Leaderboard
 
@@ -100,10 +100,10 @@ npm start
 | C→S       | `game:move`           | Player movement `{ direction: "forward"      | "backward" | "left" | "right" }` |
 | C→S       | `game:crash`          | Client reports collision                     |
 | C→S       | `game:cashout`        | Request cash out at checkpoint               |
-| S→C       | `game:started`        | Game started `{ sessionId, stake, mapSeed }` |
+| S→C       | `game:started`        | Game started `{ sessionId, onchainSessionId, stake, stakeAmountUnits, mapSeed }` |
 | S→C       | `game:state`          | State update after move                      |
 | S→C       | `game:crashed`        | Game over (crash)                            |
-| S→C       | `game:cashout_result` | Payout signature + result                    |
+| S→C       | `game:cashout_result` | Settlement signature + resolution payload    |
 | S→C       | `game:reconnected`    | Sync state after reconnect                   |
 | S→C       | `game:cp_expired`     | Checkpoint stay time expired                 |
 | S→C       | `game:error`          | Error message                                |
@@ -128,5 +128,7 @@ npm start
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes      | Supabase service role key                              |
 | `MONAD_RPC_URL`             | No       | Monad RPC endpoint                                     |
 | `MONAD_CHAIN_ID`            | No       | Monad chain ID (default: 10143)                        |
-| `GAME_VAULT_ADDRESS`        | No       | Smart Contract address                                 |
-| `BACKEND_PRIVATE_KEY`       | No       | Private key for signing payouts                        |
+| `GAME_VAULT_ADDRESS`        | No       | `GameVault` proxy address                              |
+| `GAME_SETTLEMENT_ADDRESS`   | No       | `GameSettlement` proxy address                         |
+| `BACKEND_PRIVATE_KEY`       | No       | Private key for signing settlement payloads            |
+| `SETTLEMENT_SIGNATURE_TTL_SECONDS` | No | Settlement signature expiry in seconds (default: 86400) |

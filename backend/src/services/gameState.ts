@@ -3,6 +3,7 @@ import { createTimerState } from "./timerAuthority.js";
 
 export interface ActiveGameState {
   sessionId: string;
+  onchainSessionId: string;
   walletAddress: string;
   stake: number;
   multiplierBp: number;
@@ -24,9 +25,15 @@ export interface ActiveGameState {
 const activeGames = new Map<string, ActiveGameState>();
 const sessionToWallet = new Map<string, string>();
 
-export function createGameState(sessionId: string, walletAddress: string, stake: number, socketId: string): ActiveGameState {
+export function createGameState(
+  sessionId: string,
+  onchainSessionId: string,
+  walletAddress: string,
+  stake: number,
+  socketId: string
+): ActiveGameState {
   const state: ActiveGameState = {
-    sessionId, walletAddress, stake, multiplierBp: 0, currentRow: 0, maxRow: 0, currentCp: 0,
+    sessionId, onchainSessionId, walletAddress, stake, multiplierBp: 0, currentRow: 0, maxRow: 0, currentCp: 0,
     cashoutWindow: false, cpRowIndex: 0, timer: createTimerState(), lastMoveTime: 0,
     moveTimestamps: [], isAtCheckpoint: false, disconnectTimer: null, isPaused: false, pauseStart: 0, socketId,
   };

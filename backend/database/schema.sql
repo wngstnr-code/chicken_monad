@@ -8,7 +8,7 @@
 -- ============================================================
 
 CREATE TYPE game_status AS ENUM ('ACTIVE', 'CRASHED', 'CASHED_OUT');
-CREATE TYPE tx_type AS ENUM ('DEPOSIT', 'WITHDRAW', 'CLAIM_REWARD');
+CREATE TYPE tx_type AS ENUM ('DEPOSIT', 'WITHDRAW', 'TREASURY_FUNDED', 'SESSION_STARTED', 'SESSION_SETTLED');
 
 -- ============================================================
 -- 2. Table: players
@@ -35,13 +35,16 @@ CREATE INDEX idx_players_created_at ON players (created_at DESC);
 
 CREATE TABLE game_sessions (
   session_id       UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  onchain_session_id TEXT        UNIQUE,
   wallet_address   TEXT          NOT NULL REFERENCES players(wallet_address),
   stake_amount     DECIMAL(20,6) NOT NULL DEFAULT 0,
   status           game_status   NOT NULL DEFAULT 'ACTIVE',
   max_row_reached  INTEGER       NOT NULL DEFAULT 0,
   final_multiplier DECIMAL(10,4) NOT NULL DEFAULT 0,
   payout_amount    DECIMAL(20,6) NOT NULL DEFAULT 0,
-  claim_signature  TEXT,           -- EIP-712 signature for pending claims
+  settlement_signature TEXT,       -- EIP-712 signature for settleWithSignature(...)
+  settlement_deadline  BIGINT,
+  settlement_tx_hash   TEXT,
   ended_at         TIMESTAMPTZ,
   created_at       TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
@@ -49,19 +52,22 @@ CREATE TABLE game_sessions (
 -- Indexes for common queries
 CREATE INDEX idx_sessions_wallet     ON game_sessions (wallet_address);
 CREATE INDEX idx_sessions_status     ON game_sessions (status);
+CREATE UNIQUE INDEX idx_sessions_onchain_id ON game_sessions (onchain_session_id)
+  WHERE onchain_session_id IS NOT NULL;
 CREATE INDEX idx_sessions_wallet_active ON game_sessions (wallet_address, status)
   WHERE status = 'ACTIVE';
 CREATE INDEX idx_sessions_created_at ON game_sessions (created_at DESC);
 
 -- ============================================================
 -- 4. Table: transactions
--- Blockchain transaction sync log (deposit/withdraw/claim).
+-- Blockchain transaction sync log (deposit/withdraw/session lifecycle).
 -- ============================================================
 
 CREATE TABLE transactions (
   tx_hash        TEXT        PRIMARY KEY,
   wallet_address TEXT        NOT NULL REFERENCES players(wallet_address),
   type           tx_type     NOT NULL,
+  onchain_session_id TEXT,
   amount         DECIMAL(20,6) NOT NULL DEFAULT 0,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
