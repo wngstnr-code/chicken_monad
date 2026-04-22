@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Crossy Chicken Bet | Monad Demo</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <canvas class="game"></canvas>
+
+    <!-- Top bar: balance + timer + deposit -->
+    <div id="top-bar">
+      <div class="stat-card">
+        <div class="stat-label">BALANCE</div>
+        <div class="stat-value" id="balance">$0.00</div>
+      </div>
+      <div class="stat-card timer-card" id="timer-card">
+        <div class="stat-label" id="timer-label">SEGMENT</div>
+        <div class="stat-value" id="timer">1:00</div>
+      </div>
+      <button id="bet-btn">🎲 BET</button>
+      <button id="deposit-btn">+ DEPOSIT</button>
+    </div>
+
+    <!-- In-game score (live row) -->
+    <div id="score">0</div>
+
+    <!-- In-game bet HUD (shown only when bet is active) -->
+    <div id="bet-hud" style="display: none">
+      <div class="hud-row">
+        <span class="hud-label">STAKE</span>
+        <span id="bet-stake">$0.00</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">CP</span>
+        <span id="bet-cp" class="cp-value">CP 0</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">MULT</span>
+        <span id="bet-multiplier" class="multiplier-value">0.00x</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">CASH OUT</span>
+        <span id="bet-payout" class="payout-value">$0.00</span>
+      </div>
+      <button id="cash-out-btn" class="disabled" disabled>RUN TO NEXT CP</button>
+    </div>
+
+    <!-- Movement controls -->
+    <div id="controls">
+      <div>
+        <button id="forward">▲</button>
+        <button id="left">◀</button>
+        <button id="backward">▼</button>
+        <button id="right">▶</button>
+      </div>
+    </div>
+
+    <!-- Bet setup panel (pre-game) -->
+    <div id="bet-panel" class="modal-bg">
+      <div class="modal-box">
+        <button class="close-btn" id="bet-panel-close" aria-label="Close">×</button>
+        <h2>🐔 PLACE YOUR BET</h2>
+        <p class="subtitle">Mock USD · No blockchain (demo)</p>
+
+        <div class="field">
+          <label>STAKE ($)</label>
+          <input
+            type="number"
+            id="stake-input"
+            value="10"
+            min="1"
+            step="1"
+          />
+        </div>
+
+        <div class="quick-picks">
+          <button data-amount="5">$5</button>
+          <button data-amount="10">$10</button>
+          <button data-amount="25">$25</button>
+          <button data-amount="50">$50</button>
+          <button data-amount="100">$100</button>
+        </div>
+
+        <div class="odds-info">
+          <div class="odds-row">start mult: <strong>0.00x</strong></div>
+          <div class="odds-row">per step: <strong>+0.025x</strong></div>
+          <div class="odds-row">every 40 steps: <strong>CP (×1.2)</strong></div>
+          <div class="odds-row">speed per CP: <strong>×1.10</strong></div>
+          <div class="odds-note">
+            ⏱ 60s between CPs · cash out only at CP<br/>
+            ⚠ overtime = -0.1x/s decay
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="start-bet-btn" class="primary">START BET</button>
+          <button id="free-play-btn" class="ghost">Free Play (no bet)</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Deposit modal -->
+    <div id="deposit-modal" class="modal-bg" style="display: none">
+      <div class="modal-box">
+        <button class="close-btn" id="deposit-close" aria-label="Close">×</button>
+        <h2>💵 DEPOSIT MOCK $</h2>
+        <p class="subtitle">Add mock dollars to your balance</p>
+
+        <div class="field">
+          <label>AMOUNT</label>
+          <input
+            type="number"
+            id="deposit-amount"
+            value="100"
+            min="1"
+            step="1"
+          />
+        </div>
+
+        <div class="quick-picks">
+          <button data-deposit="50">+$50</button>
+          <button data-deposit="100">+$100</button>
+          <button data-deposit="500">+$500</button>
+          <button data-deposit="1000">+$1000</button>
+        </div>
+
+        <div class="modal-actions">
+          <button id="deposit-confirm" class="primary">CONFIRM</button>
+          <button id="deposit-cancel" class="ghost">CANCEL</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Result modal (cashout / crash / free-play game over) -->
+    <div id="result-container">
+      <div id="result">
+        <h1 id="result-title">Game Over</h1>
+        <div id="result-body"></div>
+        <div class="modal-actions">
+          <button id="retry" class="primary">PLAY AGAIN</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./script.js"></script>
+  </body>
+</html>
