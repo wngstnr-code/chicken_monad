@@ -2,24 +2,8 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useAccount, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 import { MONAD_CHAIN, hasMonadChainConfig } from "../../lib/web3/monad";
-
-type RequestArguments = {
-  method: string;
-  params?: unknown[] | Record<string, unknown>;
-};
-
-type WalletProviderApi = {
-  request: <T = unknown>(args: RequestArguments) => Promise<T>;
-  on?: {
-    (event: "accountsChanged", listener: (accounts: string[]) => void): void;
-    (event: "chainChanged", listener: (chainId: string) => void): void;
-  };
-  removeListener?: {
-    (event: "accountsChanged", listener: (accounts: string[]) => void): void;
-    (event: "chainChanged", listener: (chainId: string) => void): void;
-  };
-};
 
 type WalletContextValue = {
   account: string;
@@ -40,179 +24,156 @@ type WalletProviderProps = {
   children: ReactNode;
 };
 
-type WalletError = {
+type AddChainArguments = {
+  method: "wallet_addEthereumChain";
+  params: Array<{
+    chainId: string;
+    chainName: string;
+    nativeCurrency: {
+      name: string;
+      symbol: string;
+      decimals: number;
+    };
+    rpcUrls: string[];
+    blockExplorerUrls: string[];
+  }>;
+};
+
+type Eip1193Provider = {
+  request: (args: AddChainArguments) => Promise<unknown>;
+};
+
+type ChainSwitchError = {
   code?: number;
   message?: string;
 };
 
 const WalletContext = createContext<WalletContextValue | undefined>(undefined);
 
-function getEthereumProvider(): WalletProviderApi | null {
-  if (typeof window === "undefined") return null;
-
-  const runtimeWindow = window as Window & { ethereum?: WalletProviderApi };
-  return runtimeWindow.ethereum || null;
+function toHexChainId(chainId: number | undefined) {
+  if (!chainId) return "";
+  return `0x${chainId.toString(16)}`;
 }
 
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === "string");
-}
-
-function toLowerHex(value: string) {
-  if (!value) return "";
-  return value.toLowerCase();
-}
-
-function readErrorMessage(error: unknown, fallback: string) {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as WalletError).message || fallback);
-  }
-  return fallback;
-}
-
-function readErrorCode(error: unknown): number | null {
+function readSwitchErrorCode(error: unknown) {
   if (error && typeof error === "object" && "code" in error) {
-    return Number((error as WalletError).code);
+    return Number((error as ChainSwitchError).code);
   }
   return null;
 }
 
-export function WalletProvider({ children }: WalletProviderProps) {
-  const [account, setAccount] = useState("");
-  const [chainIdHex, setChainIdHex] = useState("");
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [error, setError] = useState("");
-
-  const isMonadChain =
-    Boolean(MONAD_CHAIN.chainIdHex) &&
-    toLowerHex(chainIdHex) === toLowerHex(MONAD_CHAIN.chainIdHex);
-
-  async function refreshWalletState() {
-    const ethereum = getEthereumProvider();
-    if (!ethereum) return;
-
-    const [accountsRaw, chainIdRaw] = await Promise.all([
-      ethereum.request({ method: "eth_accounts" }),
-      ethereum.request({ method: "eth_chainId" }),
-    ]);
-
-    const accounts = toStringArray(accountsRaw);
-    const firstAccount = accounts.length > 0 ? accounts[0] : "";
-    setAccount(firstAccount);
-    setChainIdHex(typeof chainIdRaw === "string" ? chainIdRaw : "");
+function readErrorMessage(error: unknown, fallback: string) {
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as ChainSwitchError).message || fallback);
   }
+  return fallback;
+}
+
+function getEip1193Provider() {
+  if (typeof window === "undefined") return null;
+  const runtimeWindow = window as Window & { ethereum?: Eip1193Provider };
+  return runtimeWindow.ethereum || null;
+}
+
+export function WalletProvider({ children }: WalletProviderProps) {
+  const [error, setError] = useState("");
+  const { address, chainId, isConnected } = useAccount();
+  const { connectAsync, connectors, isPending: isConnectPending } = useConnect();
+  const { disconnect } = useDisconnect();
+  const { switchChainAsync, isPending: isSwitchPending } = useSwitchChain();
+
+  const chainIdHex = toHexChainId(chainId);
+  const account = address || "";
+  const hasMonadConfig = hasMonadChainConfig();
+  const isMonadChain =
+    hasMonadConfig &&
+    chainIdHex.toLowerCase() === (MONAD_CHAIN.chainIdHex || "").toLowerCase();
+  const isConnecting = isConnectPending || isSwitchPending;
 
   async function connectWallet() {
-    const ethereum = getEthereumProvider();
-    if (!ethereum) {
-      setError("Wallet EVM tidak terdeteksi. Install MetaMask atau Rabby.");
+    if (connectors.length === 0) {
+      setError("Rabby wallet tidak terdeteksi. Install/aktifkan Rabby extension dulu.");
       return;
     }
 
-    setIsConnecting(true);
     setError("");
+    const selectedConnector =
+      connectors.find((connector) => connector.id === "rabby") || connectors[0];
 
     try {
-      const accountsRaw = await ethereum.request({ method: "eth_requestAccounts" });
-      const chainIdRaw = await ethereum.request({ method: "eth_chainId" });
-      const accounts = toStringArray(accountsRaw);
-      const firstAccount = accounts.length > 0 ? accounts[0] : "";
-      setAccount(firstAccount);
-      setChainIdHex(typeof chainIdRaw === "string" ? chainIdRaw : "");
+      await connectAsync({ connector: selectedConnector });
     } catch (connectError) {
       setError(readErrorMessage(connectError, "Gagal connect wallet."));
-    } finally {
-      setIsConnecting(false);
     }
   }
 
   function disconnectWallet() {
-    // Wallet browser extension tidak punya API standar untuk force-disconnect.
-    // Kita clear local session state agar UX app tetap konsisten.
-    setAccount("");
-    setChainIdHex("");
+    disconnect();
     setError("");
   }
 
-  async function switchToMonad() {
-    const ethereum = getEthereumProvider();
-    if (!ethereum) {
+  async function addMonadChainToWallet() {
+    const provider = getEip1193Provider();
+    if (!provider) {
       setError("Wallet EVM tidak terdeteksi.");
       return;
     }
 
-    if (!hasMonadChainConfig()) {
-      setError("Config Monad belum lengkap. Isi dulu variabel di .env.local.");
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [
+        {
+          chainId: MONAD_CHAIN.chainIdHex,
+          chainName: MONAD_CHAIN.chainName,
+          nativeCurrency: MONAD_CHAIN.nativeCurrency,
+          rpcUrls: MONAD_CHAIN.rpcUrls,
+          blockExplorerUrls: MONAD_CHAIN.blockExplorerUrls,
+        },
+      ],
+    });
+  }
+
+  async function switchToMonad() {
+    if (!isConnected) {
+      setError("Connect wallet dulu sebelum switch chain.");
+      return;
+    }
+
+    if (!hasMonadConfig) {
+      setError("Config Monad belum lengkap. Isi dulu variabel di frontend/.env.local.");
       return;
     }
 
     setError("");
 
     try {
-      await ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: MONAD_CHAIN.chainIdHex }],
-      });
-      setChainIdHex(MONAD_CHAIN.chainIdHex);
+      await switchChainAsync({ chainId: MONAD_CHAIN.chainIdDecimal });
       return;
     } catch (switchError) {
-      const code = readErrorCode(switchError);
+      const switchCode = readSwitchErrorCode(switchError);
+      const shouldTryAddChain =
+        switchCode === 4902 ||
+        readErrorMessage(switchError, "").toLowerCase().includes("unrecognized");
 
-      if (code !== 4902) {
+      if (!shouldTryAddChain) {
         setError(readErrorMessage(switchError, "Gagal switch ke chain Monad."));
         return;
       }
     }
 
     try {
-      await ethereum.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: MONAD_CHAIN.chainIdHex,
-            chainName: MONAD_CHAIN.chainName,
-            nativeCurrency: MONAD_CHAIN.nativeCurrency,
-            rpcUrls: MONAD_CHAIN.rpcUrls,
-            blockExplorerUrls: MONAD_CHAIN.blockExplorerUrls,
-          },
-        ],
-      });
-      setChainIdHex(MONAD_CHAIN.chainIdHex);
-    } catch (addError) {
-      setError(readErrorMessage(addError, "Gagal menambahkan chain Monad."));
+      await addMonadChainToWallet();
+      await switchChainAsync({ chainId: MONAD_CHAIN.chainIdDecimal });
+    } catch (addChainError) {
+      setError(readErrorMessage(addChainError, "Gagal menambahkan chain Monad."));
     }
   }
 
   useEffect(() => {
-    refreshWalletState().catch(() => {
-      setError("Tidak bisa membaca state wallet.");
-    });
-  }, []);
-
-  useEffect(() => {
-    const ethereum = getEthereumProvider();
-    if (!ethereum?.on) return;
-
-    function handleAccountsChanged(accounts: string[]) {
-      const firstAccount = accounts.length > 0 ? accounts[0] : "";
-      setAccount(firstAccount);
-      if (!firstAccount) setError("");
+    if (!isConnected) {
+      setError("");
     }
-
-    function handleChainChanged(nextChainId: string) {
-      setChainIdHex(nextChainId);
-    }
-
-    ethereum.on("accountsChanged", handleAccountsChanged);
-    ethereum.on("chainChanged", handleChainChanged);
-
-    return () => {
-      if (!ethereum.removeListener) return;
-      ethereum.removeListener("accountsChanged", handleAccountsChanged);
-      ethereum.removeListener("chainChanged", handleChainChanged);
-    };
-  }, []);
+  }, [isConnected]);
 
   const value = useMemo<WalletContextValue>(
     () => ({
@@ -225,11 +186,11 @@ export function WalletProvider({ children }: WalletProviderProps) {
       disconnectWallet,
       switchToMonad,
       clearWalletError: () => setError(""),
-      hasMonadChainConfig: hasMonadChainConfig(),
+      hasMonadChainConfig: hasMonadConfig,
       monadChainIdHex: MONAD_CHAIN.chainIdHex,
       monadChainName: MONAD_CHAIN.chainName,
     }),
-    [account, chainIdHex, error, isConnecting, isMonadChain]
+    [account, chainIdHex, error, hasMonadConfig, isConnecting, isMonadChain]
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

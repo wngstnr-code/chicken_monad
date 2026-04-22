@@ -510,6 +510,68 @@ function DirectionalLight() {
   return dirLight;
 }
 
+function createMonadCheckpointBannerTexture(cpNumber) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+
+  if (!ctx) return new THREE.CanvasTexture(canvas);
+
+  ctx.fillStyle = "#1a1036";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = "#8f6dff";
+  ctx.fillRect(0, 0, canvas.width, 10);
+  ctx.fillRect(0, canvas.height - 10, canvas.width, 10);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(54, canvas.height / 2, 24, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#1a1036";
+  ctx.beginPath();
+  ctx.arc(54, canvas.height / 2, 13, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 38px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(`CHECKPOINT ${cpNumber}`, canvas.width / 2 + 16, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createGmonadGroundTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+
+  if (!ctx) return new THREE.CanvasTexture(canvas);
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.font = "bold 180px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  ctx.strokeStyle = "rgba(255,255,255,0.88)";
+  ctx.lineWidth = 18;
+  ctx.strokeText("GMonad", canvas.width / 2, canvas.height / 2 + 6);
+
+  ctx.fillStyle = "rgba(30, 18, 64, 0.88)";
+  ctx.fillText("GMonad", canvas.width / 2, canvas.height / 2 + 6);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function Grass(rowIndex, isCheckpoint) {
   const grass = new THREE.Group();
   grass.position.y = rowIndex * tileSize;
@@ -542,12 +604,7 @@ function Grass(rowIndex, isCheckpoint) {
       flatShading: true,
     });
     const bannerMat = new THREE.MeshLambertMaterial({
-      color: 0xff6b6b,
-      flatShading: true,
-    });
-    const stripeMat = new THREE.MeshLambertMaterial({
-      color: 0xffffff,
-      flatShading: true,
+      map: createMonadCheckpointBannerTexture(cpNumber),
     });
 
     const postL = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 40), postMat);
@@ -568,26 +625,22 @@ function Grass(rowIndex, isCheckpoint) {
     banner.castShadow = true;
     grass.add(banner);
 
-    const stripeCount = 6;
-    for (let i = 0; i < stripeCount; i++) {
-      const stripe = new THREE.Mesh(
-        new THREE.BoxGeometry(12, 2.5, 1),
-        stripeMat
-      );
-      const spacing = tilesPerRow * tileSize * 0.75 / stripeCount;
-      stripe.position.set(
-        -tilesPerRow * tileSize * 0.35 + spacing / 2 + i * spacing,
-        -5,
-        36
-      );
-      grass.add(stripe);
-    }
+    const gmonadGroundLabel = new THREE.Mesh(
+      new THREE.PlaneGeometry(tilesPerRow * tileSize * 0.62, tileSize * 0.7),
+      new THREE.MeshBasicMaterial({
+        map: createGmonadGroundTexture(),
+        transparent: true,
+        depthWrite: false,
+      })
+    );
+    gmonadGroundLabel.position.set(0, 0, 1.7);
+    grass.add(gmonadGroundLabel);
 
-    // Golden flags at edges
+    // Monad-themed flags at edges
     [-1, 1].forEach((side) => {
       const flag = new THREE.Mesh(
         new THREE.BoxGeometry(2, 2, 18),
-        new THREE.MeshLambertMaterial({ color: 0xffd700, flatShading: true })
+        new THREE.MeshLambertMaterial({ color: 0x7d5cff, flatShading: true })
       );
       flag.position.set(side * tilesPerRow * tileSize * 0.42, 15, 9);
       flag.castShadow = true;
@@ -595,7 +648,7 @@ function Grass(rowIndex, isCheckpoint) {
 
       const flagTop = new THREE.Mesh(
         new THREE.BoxGeometry(8, 1, 5),
-        new THREE.MeshLambertMaterial({ color: 0xffd700, flatShading: true })
+        new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true })
       );
       flagTop.position.set(
         side * tilesPerRow * tileSize * 0.42 + side * 4,

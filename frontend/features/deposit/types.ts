@@ -1,0 +1,31 @@
+export type DepositDataSource = "onchain" | "backend";
+
+export type DepositFlowViewModel = {
+  source: DepositDataSource;
+  amount: string;
+  setAmount: (value: string) => void;
+  statusMessage: string;
+  errorMessage: string;
+  isConnected: boolean;
+  isMonadChain: boolean;
+  canTransact: boolean;
+  hasValidContracts: boolean;
+  usdcAddress: string;
+  vaultAddress: string;
+  walletBalanceDisplay: string;
+  allowanceDisplay: string;
+  isWalletBalanceFetching: boolean;
+  isAllowanceFetching: boolean;
+  needsApproval: boolean;
+  approveTxHash: string;
+  approveTxUrl: string;
+  depositTxHash: string;
+  depositTxUrl: string;
+  isApproveBusy: boolean;
+  isDepositBusy: boolean;
+  disableApproveButton: boolean;
+  disableDepositButton: boolean;
+  onApprove: () => Promise<void>;
+  onDeposit: () => Promise<void>;
+  configMessage: string;
+};

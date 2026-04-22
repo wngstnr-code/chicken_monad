@@ -1,21 +1,27 @@
 "use client";
 
-import { useState } from "react";
 import type { ChangeEvent } from "react";
-import { useWallet } from "../../components/web3/WalletProvider";
-import {
-  GAME_VAULT_ADDRESS,
-  USDC_ADDRESS,
-  USDC_DECIMALS,
-  hasDepositContractConfig,
-} from "../../lib/web3/contracts";
+import { USDC_DECIMALS } from "../../lib/web3/contracts";
+import { useDepositFlow } from "../../features/deposit/useDepositFlow";
 
 export default function DepositPage() {
-  const { account, isMonadChain } = useWallet();
-  const [amount, setAmount] = useState("10");
+  const flow = useDepositFlow();
 
-  const isConnected = Boolean(account);
-  const canContinue = isConnected && isMonadChain && hasDepositContractConfig();
+  async function handleApproveClick() {
+    try {
+      await flow.onApprove();
+    } catch {
+      // Error sudah ditangani di flow implementation.
+    }
+  }
+
+  async function handleDepositClick() {
+    try {
+      await flow.onDeposit();
+    } catch {
+      // Error sudah ditangani di flow implementation.
+    }
+  }
 
   return (
     <main className="flow-page">
@@ -23,38 +29,43 @@ export default function DepositPage() {
         <p className="flow-eyebrow">Step 2</p>
         <h1 className="flow-title">Deposit USDC</h1>
         <p className="flow-copy">
-          Halaman ini jadi pondasi untuk flow `approve USDC - deposit ke vault`. Eksekusi
-          transaksi kita wiring di tahap berikutnya.
+          Flow source: <span className="mono">{flow.source}</span>. UI ini sudah pakai adapter
+          layer, jadi nanti backend/smart-contract final tinggal ganti implementation di feature
+          layer tanpa ubah halaman.
         </p>
 
         <div className="flow-status">
           <p>
-            Wallet: <strong>{isConnected ? "Connected" : "Not connected"}</strong>
+            Wallet: <strong>{flow.isConnected ? "Connected" : "Not connected"}</strong>
           </p>
           <p>
-            On Monad: <strong>{isMonadChain ? "Yes" : "No"}</strong>
+            On Monad: <strong>{flow.isMonadChain ? "Yes" : "No"}</strong>
           </p>
           <p>
             USDC Decimals: <span className="mono">{USDC_DECIMALS}</span>
           </p>
           <p>
-            USDC Address: <span className="mono">{USDC_ADDRESS || "(set in .env.local)"}</span>
+            USDC Address:{" "}
+            <span className="mono">{flow.usdcAddress || "(set in frontend/.env.local)"}</span>
           </p>
           <p>
             Vault Address:{" "}
-            <span className="mono">{GAME_VAULT_ADDRESS || "(set in .env.local)"}</span>
+            <span className="mono">{flow.vaultAddress || "(set in frontend/.env.local)"}</span>
+          </p>
+          <p>
+            Wallet USDC: <span className="mono">{flow.walletBalanceDisplay}</span>
+          </p>
+          <p>
+            Allowance: <span className="mono">{flow.allowanceDisplay}</span>
           </p>
         </div>
 
-        {!hasDepositContractConfig() && (
-          <p className="flow-alert">
-            Contract config belum lengkap. Isi `NEXT_PUBLIC_USDC_ADDRESS` dan
-            `NEXT_PUBLIC_GAME_VAULT_ADDRESS`.
-          </p>
-        )}
+        {flow.configMessage && <p className="flow-alert">{flow.configMessage}</p>}
+        {flow.statusMessage && <p className="flow-success">{flow.statusMessage}</p>}
+        {flow.errorMessage && <p className="flow-alert">{flow.errorMessage}</p>}
 
         <label className="flow-label" htmlFor="deposit-amount-ui">
-          Planned deposit amount (USDC)
+          Deposit amount (USDC)
         </label>
         <input
           id="deposit-amount-ui"
@@ -62,18 +73,54 @@ export default function DepositPage() {
           type="number"
           min="0"
           step="0.01"
-          value={amount}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setAmount(event.target.value)}
+          value={flow.amount}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => flow.setAmount(event.target.value)}
         />
 
         <div className="flow-actions">
-          <button className="flow-btn" type="button" disabled={!canContinue}>
-            Approve USDC (next step)
+          <button
+            className="flow-btn"
+            type="button"
+            disabled={flow.disableApproveButton}
+            onClick={handleApproveClick}
+          >
+            {flow.isApproveBusy ? "Approving..." : flow.needsApproval ? "Approve USDC" : "Approved"}
           </button>
-          <button className="flow-btn secondary" type="button" disabled={!canContinue}>
-            Deposit To Vault (next step)
+          <button
+            className="flow-btn secondary"
+            type="button"
+            disabled={flow.disableDepositButton}
+            onClick={handleDepositClick}
+          >
+            {flow.isDepositBusy ? "Depositing..." : "Deposit To Vault"}
           </button>
         </div>
+
+        {flow.approveTxHash && (
+          <p className="flow-tx">
+            Approve tx:{" "}
+            {flow.approveTxUrl ? (
+              <a href={flow.approveTxUrl} target="_blank" rel="noreferrer">
+                {flow.approveTxHash}
+              </a>
+            ) : (
+              <span className="mono">{flow.approveTxHash}</span>
+            )}
+          </p>
+        )}
+
+        {flow.depositTxHash && (
+          <p className="flow-tx">
+            Deposit tx:{" "}
+            {flow.depositTxUrl ? (
+              <a href={flow.depositTxUrl} target="_blank" rel="noreferrer">
+                {flow.depositTxHash}
+              </a>
+            ) : (
+              <span className="mono">{flow.depositTxHash}</span>
+            )}
+          </p>
+        )}
 
         <div className="flow-actions">
           <a href="/connect" className="flow-btn secondary">

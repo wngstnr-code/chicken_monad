@@ -51,14 +51,15 @@ export default function ConnectPage() {
           <p>
             Target Chain:{" "}
             <span className="mono">
-              {monadChainName} {monadChainIdHex || "(set in .env.local)"}
+              {monadChainName} {monadChainIdHex || "(set in frontend/.env.local)"}
             </span>
           </p>
         </div>
 
         {!hasMonadChainConfig && (
           <p className="flow-alert">
-            Config Monad belum lengkap. Isi dulu `.env.local` berdasarkan `.env.example`.
+            Config Monad belum lengkap. Isi dulu `frontend/.env.local` berdasarkan
+            `frontend/.env.example`.
           </p>
         )}
 
@@ -72,8 +73,13 @@ export default function ConnectPage() {
         )}
 
         <div className="flow-actions">
-          <button className="flow-btn" type="button" onClick={connectWallet} disabled={isConnecting}>
-            {isConnecting ? "Connecting..." : "Connect Wallet"}
+          <button
+            className="flow-btn"
+            type="button"
+            onClick={connectWallet}
+            disabled={isConnecting}
+          >
+            {isConnecting ? "Connecting..." : "Connect Rabby"}
           </button>
           <button
             className="flow-btn secondary"
