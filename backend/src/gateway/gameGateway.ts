@@ -161,7 +161,13 @@ async function handleGameStart(socket: Socket, walletAddress: string, stake: num
   });
 
   if (dbError) {
-    socket.emit("game:error", { message: "Failed to start game." });
+    console.error("❌ Supabase Error (game-start):", {
+      message: dbError.message,
+      details: dbError.details,
+      hint: dbError.hint,
+      code: dbError.code,
+    });
+    socket.emit("game:error", { message: `Failed to start game: ${dbError.message}` });
     return;
   }
 

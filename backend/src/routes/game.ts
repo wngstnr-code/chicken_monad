@@ -112,8 +112,13 @@ async function getPendingSettlements(req: Request, res: Response) {
     .limit(5);
 
   if (error) {
-    console.error("❌ Error fetching pending settlements:", error);
-    res.status(500).json({ error: "Failed to fetch pending settlements." });
+    console.error("❌ Supabase Error (pending-settlements):", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    });
+    res.status(500).json({ error: "Failed to fetch pending settlements.", details: error.message });
     return;
   }
 

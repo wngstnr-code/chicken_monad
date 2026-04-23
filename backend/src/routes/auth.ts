@@ -64,8 +64,13 @@ router.post("/verify", async (req, res) => {
       );
 
     if (dbError) {
-      console.error("❌ Failed to upsert player:", dbError);
-      // Don't block auth for DB errors in hackathon
+      console.error("❌ Supabase Error (player-upsert):", {
+        message: dbError.message,
+        details: dbError.details,
+        hint: dbError.hint,
+        code: dbError.code,
+      });
+      // Don't block auth for DB errors in hackathon, but we'll know it failed.
     }
 
     // Create session
