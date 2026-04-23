@@ -31,6 +31,7 @@ import { getActiveGameCount } from "./services/gameState.js";
 // ── Express App ──────────────────────────────────────────────
 
 const app = express();
+app.set("trust proxy", 1); // Trust first proxy (Railway)
 
 // Security middleware
 app.use(
