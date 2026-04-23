@@ -76,7 +76,7 @@ router.post("/verify", async (req, res) => {
     res.cookie(SESSION_COOKIE, token, {
       httpOnly: true,
       secure: env.NODE_ENV === "production",
-      sameSite: env.NODE_ENV === "production" ? "strict" : "lax",
+      sameSite: env.NODE_ENV === "production" ? "none" : "lax",
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
       path: "/",
     });
@@ -101,7 +101,12 @@ router.post("/logout", (req, res) => {
     deleteSession(token);
   }
 
-  res.clearCookie(SESSION_COOKIE, { path: "/" });
+  res.clearCookie(SESSION_COOKIE, {
+    path: "/",
+    httpOnly: true,
+    secure: env.NODE_ENV === "production",
+    sameSite: env.NODE_ENV === "production" ? "none" : "lax",
+  });
   res.json({ success: true });
 });
 
