@@ -948,9 +948,10 @@ export function GameBridgeClient({
             txHash,
           };
         } catch (error) {
+          console.error("❌ Smart Contract Revert (startSession):", error);
           socket.emit("game:abort_start", { sessionId: payload.sessionId });
           throw new Error(
-            toUserFacingWalletError(error, "Transaksi startSession gagal.", {
+            toUserFacingWalletError(error, "Transaksi startSession gagal/revert.", {
               userRejectedMessage: "Start bet dibatalkan di wallet.",
             }),
           );
