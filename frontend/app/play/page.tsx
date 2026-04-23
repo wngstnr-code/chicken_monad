@@ -1,4 +1,5 @@
 import { GameCanvas } from "../../components/game/GameCanvas";
+import { PlayTopNav } from "../../components/game/PlayTopNav";
 
 type PlayPageProps = {
   searchParams?: {
@@ -13,11 +14,7 @@ export default function PlayPage({ searchParams }: PlayPageProps) {
   return (
     <div className={isBackgroundMode ? "play-bg-mode" : undefined}>
       {!isBackgroundMode && (
-        <nav className="play-nav">
-          <a href="/">Home</a>
-          <a href="/connect">Connect</a>
-          <a href="/deposit">Deposit</a>
-        </nav>
+        <PlayTopNav />
       )}
       <GameCanvas backgroundMode={isBackgroundMode} />
     </div>

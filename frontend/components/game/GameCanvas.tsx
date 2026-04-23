@@ -10,27 +10,141 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
     <>
       <GameBridgeClient backgroundMode={backgroundMode} />
       <canvas className="game" />
+      <div id="hud-scrim" aria-hidden="true" />
 
       <div id="top-bar">
-        <div className="stat-card">
-          <div className="stat-label">BALANCE</div>
-          <div className="stat-value" id="balance">
-            $0.00
+        <div id="top-bar-left">
+          <div className="stat-card score-card">
+            <div className="score-card-main">
+              <div className="score-metric">
+                <span className="score-meta">HOPS</span>
+                <span className="stat-value" id="score">
+                  0
+                </span>
+              </div>
+              <div className="score-separator" aria-hidden="true" />
+              <div className="score-metric">
+                <span className="score-meta">CURRENT CP</span>
+                <span className="score-cp-value" id="score-cp">
+                  0
+                </span>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="stat-card timer-card" id="timer-card">
-          <div className="stat-label" id="timer-label">
-            SEGMENT
-          </div>
-          <div className="stat-value" id="timer">
-            1:00
-          </div>
-        </div>
-        <button id="bet-btn">BET</button>
-        <button id="deposit-btn">DEPOSIT</button>
-      </div>
+          <button
+            id="leaderboard-btn"
+            type="button"
+            aria-expanded="false"
+            aria-controls="leaderboard-panel"
+          >
+            <span className="leaderboard-btn-label">LEADERBOARD</span>
+            <span className="leaderboard-btn-chevron" aria-hidden="true">
+              {"\u25BE"}
+            </span>
+          </button>
 
-      <div id="score">0</div>
+          <div id="leaderboard-panel" style={{ display: "none" }} aria-hidden="true">
+            <div className="leaderboard-panel-head">
+              <h3>TOP PLAYERS</h3>
+            </div>
+            <p id="leaderboard-status" className="leaderboard-status">
+              Top 10 players by best hops.
+            </p>
+            <div className="leaderboard-self-card">
+              <span>YOUR RANK</span>
+              <strong id="leaderboard-your-rank">-</strong>
+            </div>
+            <ol id="leaderboard-list" className="leaderboard-list" />
+            <button id="leaderboard-refresh" type="button">
+              REFRESH
+            </button>
+          </div>
+
+          <button
+            id="stats-btn"
+            type="button"
+            aria-expanded="false"
+            aria-controls="stats-panel"
+          >
+            <span className="stats-btn-label">STATS</span>
+            <span className="stats-btn-chevron" aria-hidden="true">
+              {"\u25BE"}
+            </span>
+          </button>
+
+          <div id="stats-panel" style={{ display: "none" }} aria-hidden="true">
+            <div className="leaderboard-panel-head">
+              <h3>PLAYER STATS</h3>
+            </div>
+            <p id="stats-status" className="leaderboard-status">
+              Track your runs and recent onchain activity.
+            </p>
+            <div className="stats-summary-grid">
+              <div className="stats-summary-card">
+                <span>GAMES</span>
+                <strong id="stats-total-games">0</strong>
+              </div>
+              <div className="stats-summary-card">
+                <span>WINS</span>
+                <strong id="stats-total-wins">0</strong>
+              </div>
+              <div className="stats-summary-card">
+                <span>LOSSES</span>
+                <strong id="stats-total-losses">0</strong>
+              </div>
+              <div className="stats-summary-card">
+                <span>NET PNL</span>
+                <strong id="stats-total-profit">$0.00</strong>
+              </div>
+            </div>
+            <p id="stats-joined" className="stats-joined">
+              Joined: -
+            </p>
+            <div className="stats-tabs" role="tablist" aria-label="Player history">
+              <button
+                id="stats-tab-runs"
+                className="active"
+                type="button"
+                data-stats-tab="runs"
+                role="tab"
+                aria-selected="true"
+              >
+                RUNS
+              </button>
+              <button
+                id="stats-tab-txs"
+                type="button"
+                data-stats-tab="txs"
+                role="tab"
+                aria-selected="false"
+              >
+                TXS
+              </button>
+            </div>
+            <div id="stats-list" className="stats-list" />
+            <button id="stats-refresh" type="button">
+              REFRESH
+            </button>
+          </div>
+        </div>
+        <div id="top-bar-center">
+          <div className="stat-card">
+            <div className="stat-label">BALANCE</div>
+            <div className="stat-value" id="balance">
+              $0.00
+            </div>
+          </div>
+          <div className="stat-card timer-card" id="timer-card">
+            <div className="stat-label" id="timer-label">
+              RUSH
+            </div>
+            <div className="stat-value" id="timer">
+              1:00
+            </div>
+          </div>
+          <button id="bet-btn">BET</button>
+        </div>
+      </div>
 
       <div id="bet-hud" style={{ display: "none" }}>
         <div className="hud-row">
@@ -49,11 +163,19 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
             0.00x
           </span>
         </div>
+        <div id="decay-row" className="hud-row hud-row-decay" style={{ display: "none" }}>
+          <span className="hud-label decay-label">DECAY</span>
+          <span id="bet-decay" className="decay-value">-0.1x/s</span>
+        </div>
         <div className="hud-row">
           <span className="hud-label">CASH OUT</span>
           <span id="bet-payout" className="payout-value">
             $0.00
           </span>
+        </div>
+        <div id="cp-timer-row" className="hud-row hud-row-cp-timer" style={{ display: "none" }}>
+          <span className="hud-label cp-timer-label">CP TIME</span>
+          <span id="bet-cp-timer" className="cp-timer-value">1:00</span>
         </div>
         <button id="cash-out-btn" className="disabled" disabled>
           RUN TO NEXT CP
@@ -70,7 +192,7 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
       </div>
 
       <div id="bet-panel" className="modal-bg">
-        <div className="modal-box">
+        <div className="modal-box modal-box-bet">
           <button className="close-btn" id="bet-panel-close" aria-label="Close">
             X
           </button>
@@ -91,22 +213,34 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
           </div>
 
           <div className="odds-info">
+            <p className="odds-title">BET RULES</p>
             <div className="odds-row">
-              start mult: <strong>0.00x</strong>
+              <span className="odds-key">Start multiplier</span>
+              <strong>0.00x</strong>
             </div>
             <div className="odds-row">
-              per step: <strong>+0.025x</strong>
+              <span className="odds-key">Per forward step</span>
+              <strong>+0.025x</strong>
             </div>
             <div className="odds-row">
-              every 40 steps: <strong>CP (x1.2)</strong>
+              <span className="odds-key">Every 40 steps</span>
+              <strong>Checkpoint x1.2</strong>
             </div>
             <div className="odds-row">
-              speed per CP: <strong>x1.10</strong>
+              <span className="odds-key">Speed per checkpoint</span>
+              <strong>x1.10</strong>
             </div>
-            <div className="odds-note">
-              60s between CPs - cash out only at CP
-              <br />
-              overtime = -0.1x/s decay
+            <div className="odds-divider" aria-hidden="true" />
+            <div className="odds-note-list">
+              <div className="odds-note-item">
+                <span className="dot dot-yellow" aria-hidden="true" /> 60s timer between checkpoints
+              </div>
+              <div className="odds-note-item">
+                <span className="dot dot-green" aria-hidden="true" /> Cash out only while at checkpoint
+              </div>
+              <div className="odds-note-item">
+                <span className="dot dot-red" aria-hidden="true" /> Overtime penalty: -0.1x per second
+              </div>
             </div>
           </div>
 
@@ -122,16 +256,15 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
       </div>
 
       <div id="deposit-modal" className="modal-bg" style={{ display: "none" }}>
-        <div className="modal-box">
+        <div className="modal-box modal-box-deposit">
           <button className="close-btn" id="deposit-close" aria-label="Close">
             X
           </button>
-          <h2>DEPOSIT MOCK $</h2>
-          <p className="subtitle">Add mock dollars to your balance</p>
+          <h2>DEPOSIT TO VAULT</h2>
 
           <div className="field">
-            <label>AMOUNT</label>
-            <input type="number" id="deposit-amount" defaultValue="100" min="1" step="1" />
+            <label>AMOUNT (USDC)</label>
+            <input type="number" id="deposit-amount" defaultValue="100" min="0.1" step="0.1" />
           </div>
 
           <div className="quick-picks">
@@ -141,13 +274,39 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
             <button data-deposit="1000">+$1000</button>
           </div>
 
-          <div className="modal-actions">
+          <div className="deposit-balances" id="deposit-balances">
+            <p>
+              <span>WALLET USDC</span>
+              <strong id="deposit-wallet-balance">-</strong>
+            </p>
+            <p>
+              <span>VAULT AVAILABLE</span>
+              <strong id="deposit-vault-available">-</strong>
+            </p>
+            <p>
+              <span>VAULT LOCKED</span>
+              <strong id="deposit-vault-locked">-</strong>
+            </p>
+            <p>
+              <span>ALLOWANCE</span>
+              <strong id="deposit-allowance">-</strong>
+            </p>
+          </div>
+
+          <p id="deposit-status" className="subtitle" />
+
+          <div className="modal-actions modal-actions-deposit">
             <button id="deposit-confirm" className="primary">
-              CONFIRM
+              DEPOSIT NOW
             </button>
-            <button id="deposit-cancel" className="ghost">
-              CANCEL
+            <div className="deposit-action-divider" aria-hidden="true" />
+            <button id="deposit-faucet" className="faucet">
+              CLAIM FAUCET
             </button>
+            <div className="deposit-action-divider" aria-hidden="true" />
+            <a id="deposit-manage-funds" className="manage" href="/deposit">
+              MANAGE FUNDS
+            </a>
           </div>
         </div>
       </div>
@@ -161,6 +320,71 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
               PLAY AGAIN
             </button>
           </div>
+        </div>
+      </div>
+
+      <button id="game-help-btn" className="fixed-help" type="button" title="Game Rules">
+        ?
+      </button>
+
+      <div id="game-help-modal" className="info-modal-overlay" style={{ display: "none" }}>
+        <div className="info-modal-box" role="dialog" aria-modal="true" aria-labelledby="game-help-title">
+          <button className="info-modal-close" id="game-help-close" aria-label="Close">
+            X
+          </button>
+          <h2 id="game-help-title">GAME RULES</h2>
+          <div className="home-help-content">
+            <div className="help-step">
+              <span className="step-num">1</span>
+              <div>
+                <p className="step-title">CORE LOOP</p>
+                <p>
+                  Move forward to increase multiplier. Survive traffic and reach
+                  checkpoints.
+                </p>
+              </div>
+            </div>
+            <div className="help-step">
+              <span className="step-num">2</span>
+              <div>
+                <p className="step-title">MULTIPLIER</p>
+                <p>
+                  Every forward step adds +0.025x. Checkpoint bonus is x1.2
+                  compound.
+                </p>
+              </div>
+            </div>
+            <div className="help-step">
+              <span className="step-num">3</span>
+              <div>
+                <p className="step-title">CHECKPOINT WINDOW</p>
+                <p>
+                  Checkpoint appears every 40 hops. Cash out only while you are
+                  at a checkpoint.
+                </p>
+              </div>
+            </div>
+            <div className="help-step">
+              <span className="step-num">4</span>
+              <div>
+                <p className="step-title">TIME & DECAY</p>
+                <p>
+                  You have 60s between checkpoints. If overtime, multiplier
+                  decays at -0.1x per second.
+                </p>
+              </div>
+            </div>
+            <div className="help-step">
+              <span className="step-num">5</span>
+              <div>
+                <p className="step-title">LOSE CONDITION</p>
+                <p>Hit by a vehicle before cash out means stake is lost.</p>
+              </div>
+            </div>
+          </div>
+          <button className="flow-btn secondary info-modal-action" id="game-help-got-it" type="button">
+            GOT IT
+          </button>
         </div>
       </div>
 

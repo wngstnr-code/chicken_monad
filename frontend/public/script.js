@@ -16,7 +16,8 @@ const CP_INTERVAL = 40; // checkpoint every 40 steps
 const SEGMENT_TIME_MS = 60 * 1000; // 60s between CPs
 const CP_MAX_STAY_MS = 60 * 1000; // auto-exit CP after 60s
 const DECAY_BP_PER_SEC = 1000; // -0.1x per second = -1000 bp/s
-const SPEED_MULT_PER_CP = 1.1; // vehicle speed × 1.1 per CP
+const SPEED_MULT_PER_CP = 1.3; // vehicle speed × 1.3 per CP
+const MAX_MOVE_QUEUE = 8;
 
 const bet = {
   balance: 0,
@@ -30,6 +31,7 @@ const bet = {
   cashoutWindow: false,
   cpEnterTime: 0,
   cpRowIndex: 0,
+  cpStayRemainingMs: 0,
 
   // Segment (between CP) timer
   segmentActive: false,
@@ -37,6 +39,8 @@ const bet = {
 
   // Decay tracking
   lastDecayTick: 0,
+  isDecaying: false,
+  reconnecting: false,
 
   timerInterval: null,
 };
@@ -79,15 +83,79 @@ function renderBalance() {
   if (el) el.innerText = "$" + bet.balance.toFixed(2);
 }
 
-function deposit(amount) {
-  if (!isFinite(amount) || amount <= 0) return;
-  if (hasLiveBridge()) {
-    getBridge().openDeposit(amount);
+function dispatchPlayStatus({ message = "", tone = "info", sticky = false, clear = false, durationMs } = {}) {
+  window.dispatchEvent(
+    new CustomEvent("chicken:play-status", {
+      detail: { message, tone, sticky, clear, durationMs },
+    })
+  );
+}
+
+function formatBridgeError(error, fallback) {
+  if (error && typeof error === "object" && "message" in error) {
+    return String(error.message || fallback);
+  }
+  return fallback;
+}
+
+function isUserRejectedBridgeError(error) {
+  const message = formatBridgeError(error, "").toLowerCase();
+  return (
+    message.includes("user rejected") ||
+    message.includes("rejected the request") ||
+    message.includes("user denied")
+  );
+}
+
+function setDepositButtonState(label = "DEPOSIT", busy = false) {
+  window.dispatchEvent(
+    new CustomEvent("chicken:deposit-ui-state", {
+      detail: { label, busy },
+    })
+  );
+}
+
+function setBetButtonState() {
+  const betBtn = document.getElementById("bet-btn");
+  if (!betBtn) return;
+
+  if (settlementPending) {
+    betBtn.innerText = "SETTLING...";
+    betBtn.classList.add("busy");
+    betBtn.classList.remove("active");
+    betBtn.disabled = true;
     return;
   }
+
+  if (bet.reconnecting) {
+    betBtn.innerText = "RECONNECTING...";
+    betBtn.classList.add("busy");
+    betBtn.classList.remove("active");
+    betBtn.disabled = true;
+    return;
+  }
+
+  if (bet.active) {
+    betBtn.innerText = "BET LIVE";
+    betBtn.classList.add("active");
+    betBtn.classList.remove("busy");
+    betBtn.disabled = false;
+    return;
+  }
+
+  betBtn.innerText = "BET";
+  betBtn.classList.remove("active");
+  betBtn.classList.remove("busy");
+  betBtn.disabled = false;
+}
+
+function deposit(amount) {
+  if (!isFinite(amount) || amount <= 0) return false;
+  if (hasLiveBridge()) return false;
   bet.balance += amount;
   saveBalance();
   renderBalance();
+  return true;
 }
 
 function activateBet(stake, availableBalance) {
@@ -107,15 +175,19 @@ function activateBet(stake, availableBalance) {
   bet.cashoutWindow = false;
   bet.cpEnterTime = 0;
   bet.cpRowIndex = 0;
+  bet.cpStayRemainingMs = 0;
   bet.segmentActive = true; // first segment starts immediately from step 0
   bet.segmentStart = Date.now();
   bet.lastDecayTick = Date.now();
+  bet.isDecaying = false;
+  bet.reconnecting = false;
 
   startBetTicker();
   renderBetHud();
   showBetHud(true);
   showBetPanel(false);
   hideResult();
+  setBetButtonState();
 
   initializeGame();
   return true;
@@ -129,8 +201,9 @@ async function startBet(stake) {
       const result = await getBridge().startBet(stake);
       return activateBet(stake, result.availableBalance);
     } catch (error) {
+      const message = formatBridgeError(error, "Failed to start live bet.");
       console.error("Failed to start live bet:", error);
-      alert(error?.message || "Failed to start live bet.");
+      window.dispatchEvent(new CustomEvent("chicken:game-error", { detail: { message } }));
       void loadBalance();
       return false;
     }
@@ -187,7 +260,7 @@ function closeCashoutWindow() {
 }
 
 function canCashOut() {
-  return bet.active && bet.cashoutWindow;
+  return bet.active && bet.cashoutWindow && !bet.reconnecting;
 }
 
 async function cashOut(reason) {
@@ -197,6 +270,13 @@ async function cashOut(reason) {
 
   if (hasLiveBridge()) {
     settlementPending = true;
+    setBetButtonState();
+    let keepStatusMessage = false;
+    dispatchPlayStatus({
+      message: "SETTLING CASH OUT...",
+      tone: "busy",
+      sticky: true,
+    });
     try {
       const result = await getBridge().cashOut();
       bet.active = false;
@@ -216,9 +296,31 @@ async function cashOut(reason) {
       });
     } catch (error) {
       console.error("Failed to settle cashout:", error);
-      alert(error?.message || "Failed to settle cashout.");
+      // Backend already finalized the offchain session, so keep UI in sync
+      // and force the player back to a clean pre-bet state.
+      bet.active = false;
+      bet.cashoutWindow = false;
+      bet.segmentActive = false;
+      stopBetTicker();
+      showBetHud(false);
+      showBetPanel(true);
+      const fallbackMessage = isUserRejectedBridgeError(error)
+        ? "Cash out dibatalkan di wallet. Selesaikan pending settlement lalu start bet lagi."
+        : "Failed to settle cashout.";
+      const message = formatBridgeError(error, fallbackMessage);
+      keepStatusMessage = true;
+      dispatchPlayStatus({
+        message,
+        tone: "error",
+        durationMs: 4200,
+      });
+      alert(message);
     } finally {
       settlementPending = false;
+      setBetButtonState();
+      if (!keepStatusMessage) {
+        dispatchPlayStatus({ clear: true });
+      }
       void loadBalance();
     }
     return;
@@ -226,6 +328,7 @@ async function cashOut(reason) {
 
   bet.active = false;
   stopBetTicker();
+  setBetButtonState();
 
   const mult = bet.multiplierBp / 10000;
   const payout = bet.stake * mult;
@@ -253,6 +356,13 @@ async function crashBet(reason) {
 
   if (hasLiveBridge()) {
     settlementPending = true;
+    setBetButtonState();
+    let keepStatusMessage = false;
+    dispatchPlayStatus({
+      message: "SETTLING RUN RESULT...",
+      tone: "busy",
+      sticky: true,
+    });
     const mult = bet.multiplierBp / 10000;
     const lostStake = bet.stake;
     bet.active = false;
@@ -276,9 +386,20 @@ async function crashBet(reason) {
       });
     } catch (error) {
       console.error("Failed to settle crash:", error);
-      alert(error?.message || "Failed to settle crash.");
+      const message = error?.message || "Failed to settle crash.";
+      keepStatusMessage = true;
+      dispatchPlayStatus({
+        message,
+        tone: "error",
+        durationMs: 4200,
+      });
+      alert(message);
     } finally {
       settlementPending = false;
+      setBetButtonState();
+      if (!keepStatusMessage) {
+        dispatchPlayStatus({ clear: true });
+      }
       void loadBalance();
     }
     return;
@@ -286,6 +407,7 @@ async function crashBet(reason) {
 
   bet.active = false;
   stopBetTicker();
+  setBetButtonState();
 
   const mult = bet.multiplierBp / 10000;
   showBetHud(false);
@@ -305,12 +427,14 @@ function startBetTicker() {
   bet.timerInterval = setInterval(tickBet, 100);
 }
 
-function stopBetTicker() {
+function stopBetTicker({ resetTimer = true } = {}) {
   if (bet.timerInterval) {
     clearInterval(bet.timerInterval);
     bet.timerInterval = null;
   }
-  renderTimer(SEGMENT_TIME_MS, false);
+  if (resetTimer) {
+    renderTimer(SEGMENT_TIME_MS, false);
+  }
 }
 
 function tickBet() {
@@ -322,6 +446,9 @@ function tickBet() {
     const stayElapsed = now - bet.cpEnterTime;
     const remaining = Math.max(0, CP_MAX_STAY_MS - stayElapsed);
     renderTimer(remaining, true); // "AT CP" mode
+    bet.cpStayRemainingMs = remaining;
+    bet.isDecaying = false;
+    renderBetHud(); // update CP timer row in HUD every tick
     if (remaining <= 0) {
       closeCashoutWindow();
     }
@@ -330,9 +457,11 @@ function tickBet() {
     const segElapsed = now - bet.segmentStart;
     const remaining = Math.max(0, SEGMENT_TIME_MS - segElapsed);
     renderTimer(remaining, false);
+    bet.cpStayRemainingMs = 0;
 
     // --- Decay logic: after segment time is up, -0.1x per second ---
     if (segElapsed > SEGMENT_TIME_MS) {
+      bet.isDecaying = true;
       const decayDeltaMs = now - bet.lastDecayTick;
       const decayBp = Math.floor((DECAY_BP_PER_SEC * decayDeltaMs) / 1000);
       if (decayBp > 0) {
@@ -341,8 +470,12 @@ function tickBet() {
         renderBetHud();
       }
     } else {
+      bet.isDecaying = false;
       bet.lastDecayTick = now;
     }
+  } else {
+    bet.isDecaying = false;
+    bet.cpStayRemainingMs = 0;
   }
 }
 
@@ -357,7 +490,7 @@ function renderTimer(ms, atCp) {
   const s = totalSec % 60;
   el.innerText = `${m}:${s.toString().padStart(2, "0")}`;
 
-  if (labelEl) labelEl.innerText = atCp ? "AT CP" : "SEGMENT";
+  if (labelEl) labelEl.innerText = atCp ? "AT CP" : "RUSH";
 
   if (card) {
     if (ms < 15000 && bet.active) card.classList.add("timer-warning");
@@ -372,15 +505,47 @@ function renderBetHud() {
   const multEl = document.getElementById("bet-multiplier");
   const payEl = document.getElementById("bet-payout");
   const cpEl = document.getElementById("bet-cp");
+  const scoreCpEl = document.getElementById("score-cp");
   const cashoutBtn = document.getElementById("cash-out-btn");
+  const decayRow = document.getElementById("decay-row");
+  const cpTimerRow = document.getElementById("cp-timer-row");
+  const cpTimerEl = document.getElementById("bet-cp-timer");
 
   if (stakeEl) stakeEl.innerText = "$" + bet.stake.toFixed(2);
   if (multEl) multEl.innerText = mult.toFixed(2) + "x";
   if (payEl) payEl.innerText = "$" + payout.toFixed(2);
   if (cpEl) cpEl.innerText = "CP " + bet.currentCp;
+  if (scoreCpEl) scoreCpEl.innerText = String(bet.currentCp);
+
+  // Decay indicator
+  if (decayRow) {
+    decayRow.style.display = bet.isDecaying ? "flex" : "none";
+  }
+
+  // CP Stay countdown
+  if (cpTimerRow && cpTimerEl) {
+    if (bet.cashoutWindow && bet.cpStayRemainingMs > 0) {
+      cpTimerRow.style.display = "flex";
+      const totalSec = Math.ceil(bet.cpStayRemainingMs / 1000);
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      cpTimerEl.innerText = `${m}:${s.toString().padStart(2, "0")}`;
+      if (bet.cpStayRemainingMs < 15000) {
+        cpTimerEl.classList.add("cp-timer-urgent");
+      } else {
+        cpTimerEl.classList.remove("cp-timer-urgent");
+      }
+    } else {
+      cpTimerRow.style.display = "none";
+    }
+  }
 
   if (cashoutBtn) {
-    if (canCashOut()) {
+    if (bet.reconnecting) {
+      cashoutBtn.disabled = true;
+      cashoutBtn.classList.add("disabled");
+      cashoutBtn.innerText = "RECONNECTING...";
+    } else if (canCashOut()) {
       cashoutBtn.disabled = false;
       cashoutBtn.classList.remove("disabled");
       cashoutBtn.innerText = "CASH OUT";
@@ -402,6 +567,99 @@ function showBetHud(show) {
   if (el) el.style.display = show ? "block" : "none";
 }
 
+function syncPlayerToGrid() {
+  player.position.x = position.currentTile * tileSize;
+  player.position.y = position.currentRow * tileSize;
+  player.children[0].position.z = 0;
+}
+
+function pauseActiveBetForReconnect() {
+  if (!bet.active) return;
+
+  bet.reconnecting = true;
+  bet.isDecaying = false;
+  movesQueue.length = 0;
+
+  if (moveClock.running) moveClock.stop();
+
+  syncPlayerToGrid();
+  stopBetTicker({ resetTimer: false });
+  hideResult();
+  showBetHud(true);
+  showBetPanel(false);
+  setBetButtonState();
+  renderBetHud();
+}
+
+function restoreActiveBetFromSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return false;
+
+  const row = Math.max(0, Number(snapshot.row) || 0);
+  const maxRow = Math.max(row, Number(snapshot.maxRow) || 0);
+  const currentCp = Math.max(0, Number(snapshot.cp) || 0);
+  const cashoutWindow = Boolean(snapshot.cashoutWindow);
+  const segmentRemainingMs = Math.max(0, Number(snapshot.segmentRemainingMs) || 0);
+  const cpStayRemainingMs = Math.max(0, Number(snapshot.cpStayRemainingMs) || 0);
+  const decayBp = Math.max(0, Number(snapshot.decayBp) || 0);
+  const effectiveMultiplierBp = Math.max(0, Math.floor(Number(snapshot.multiplierBp) || 0));
+  const now = Date.now();
+
+  settlementPending = false;
+  gameOver = false;
+  bet.active = true;
+  bet.reconnecting = false;
+  bet.stake = Math.max(0, Number(snapshot.stake) || 0);
+  bet.maxRow = maxRow;
+  bet.currentCp = currentCp;
+  bet.cashoutWindow = cashoutWindow;
+  bet.cpRowIndex = cashoutWindow ? row : currentCp * CP_INTERVAL;
+  bet.cpStayRemainingMs = cashoutWindow ? cpStayRemainingMs : 0;
+  bet.cpEnterTime = cashoutWindow ? now - Math.max(0, CP_MAX_STAY_MS - cpStayRemainingMs) : 0;
+  bet.segmentActive = !cashoutWindow;
+  bet.segmentStart = segmentRemainingMs > 0
+    ? now - Math.max(0, SEGMENT_TIME_MS - segmentRemainingMs)
+    : now - SEGMENT_TIME_MS - Math.floor((decayBp * 1000) / DECAY_BP_PER_SEC);
+  bet.lastDecayTick = now;
+  bet.isDecaying = !cashoutWindow && decayBp > 0;
+  bet.multiplierBp = effectiveMultiplierBp;
+
+  movesQueue.length = 0;
+  if (moveClock.running) moveClock.stop();
+  position.currentRow = row;
+
+  syncPlayerToGrid();
+
+  if (scoreDOM) scoreDOM.innerText = String(position.currentRow);
+  if (scoreCpDOM) scoreCpDOM.innerText = String(bet.currentCp);
+
+  hideResult();
+  showBetPanel(false);
+  showBetHud(true);
+  setBetButtonState();
+  renderBetHud();
+  tickBet();
+  startBetTicker();
+  return true;
+}
+
+function resetBetAfterReconnectFailure() {
+  settlementPending = false;
+  bet.active = false;
+  bet.reconnecting = false;
+  bet.cashoutWindow = false;
+  bet.segmentActive = false;
+  bet.cpStayRemainingMs = 0;
+  bet.isDecaying = false;
+  movesQueue.length = 0;
+
+  if (moveClock.running) moveClock.stop();
+
+  stopBetTicker();
+  setBetButtonState();
+  renderBetHud();
+  showBetHud(false);
+}
+
 function showResult(data) {
   gameOver = true;
   movesQueue.length = 0;
@@ -418,7 +676,7 @@ function showResult(data) {
     const profitSign = data.profit >= 0 ? "+" : "-";
     bodyEl.innerHTML = `
       <p>Checkpoint: <strong>${data.cp}</strong></p>
-      <p>Rows survived: <strong>${data.rows}</strong></p>
+      <p>Hops survived: <strong>${data.rows}</strong></p>
       <p>Multiplier: <strong>${data.multiplier.toFixed(2)}x</strong></p>
       <p>Payout: <strong>$${data.payout.toFixed(2)}</strong></p>
       <p class="${profitClass}">Profit: ${profitSign}$${Math.abs(data.profit).toFixed(2)}</p>
@@ -428,14 +686,14 @@ function showResult(data) {
     titleEl.style.color = "#c0392b";
     bodyEl.innerHTML = `
       <p>Last checkpoint: <strong>${data.cp}</strong></p>
-      <p>Rows survived: <strong>${data.rows}</strong></p>
+      <p>Hops survived: <strong>${data.rows}</strong></p>
       <p>Last multiplier: <strong>${data.multiplier.toFixed(2)}x</strong></p>
       <p class="profit-negative">Lost: -$${data.stake.toFixed(2)}</p>
     `;
   } else {
     titleEl.innerText = "GAME OVER";
     titleEl.style.color = "#c0392b";
-    bodyEl.innerHTML = `<p>Score: <strong>${position.currentRow}</strong></p>`;
+    bodyEl.innerHTML = `<p>Hops: <strong>${position.currentRow}</strong></p>`;
   }
   resultDOM.style.visibility = "visible";
 }
@@ -1018,6 +1276,7 @@ function initializePlayer() {
 
 function isInputBlocked() {
   if (gameOver) return true;
+  if (bet.reconnecting) return true;
   const betPanel = document.getElementById("bet-panel");
   const depositModal = document.getElementById("deposit-modal");
   if (betPanel && betPanel.style.display !== "none") return true;
@@ -1027,6 +1286,8 @@ function isInputBlocked() {
 
 function queueMove(direction) {
   if (isInputBlocked()) return;
+
+  if (movesQueue.length >= MAX_MOVE_QUEUE) return;
 
   const isValidMove = endsUpInValidPosition(
     {
@@ -1039,18 +1300,20 @@ function queueMove(direction) {
   if (!isValidMove) return;
 
   movesQueue.push(direction);
-  if (hasLiveBridge()) {
-    getBridge().sendMove(direction);
-  }
 }
 
 function stepCompleted() {
   const direction = movesQueue.shift();
+  if (!direction) return;
 
   if (direction === "forward") position.currentRow += 1;
   if (direction === "backward") position.currentRow -= 1;
   if (direction === "left") position.currentTile -= 1;
   if (direction === "right") position.currentTile += 1;
+
+  if (hasLiveBridge()) {
+    getBridge().sendMove(direction);
+  }
 
   // Add new rows if the player is running out of them
   if (position.currentRow > metadata.length - 10) addRows();
@@ -1412,7 +1675,7 @@ function generateForesMetadata() {
 
 function generateCarLaneMetadata() {
   const direction = randomElement([true, false]);
-  const speed = randomElement([125, 156, 188]);
+  const speed = randomElement([200, 250, 300]);
 
   const occupiedTiles = new Set();
 
@@ -1438,7 +1701,7 @@ function generateCarLaneMetadata() {
 
 function generateTruckLaneMetadata() {
   const direction = randomElement([true, false]);
-  const speed = randomElement([125, 156, 188]);
+  const speed = randomElement([200, 250, 300]);
 
   const occupiedTiles = new Set();
 
@@ -1626,6 +1889,7 @@ const camera = Camera();
 player.add(camera);
 
 const scoreDOM = document.getElementById("score");
+const scoreCpDOM = document.getElementById("score-cp");
 const resultDOM = document.getElementById("result-container");
 
 initializeGame();
@@ -1635,8 +1899,13 @@ function initializeGame() {
   initializePlayer();
   initializeMap();
   gameOver = false;
+  bet.reconnecting = false;
+  bet.cpStayRemainingMs = 0;
+  bet.isDecaying = false;
+  setBetButtonState();
 
   if (scoreDOM) scoreDOM.innerText = "0";
+  if (scoreCpDOM) scoreCpDOM.innerText = "0";
   if (resultDOM) resultDOM.style.visibility = "hidden";
 }
 
@@ -1644,34 +1913,913 @@ function initBettingUI() {
   void loadBalance();
   renderTimer(SEGMENT_TIME_MS, false);
 
-  const depositBtn = document.getElementById("deposit-btn");
   const depositModal = document.getElementById("deposit-modal");
   const depositAmount = document.getElementById("deposit-amount");
   const depositConfirm = document.getElementById("deposit-confirm");
-  const depositCancel = document.getElementById("deposit-cancel");
+  const depositFaucet = document.getElementById("deposit-faucet");
+  const depositManageFunds = document.getElementById("deposit-manage-funds");
+  const depositStatus = document.getElementById("deposit-status");
+  const depositWalletBalance = document.getElementById("deposit-wallet-balance");
+  const depositVaultAvailable = document.getElementById("deposit-vault-available");
+  const depositVaultLocked = document.getElementById("deposit-vault-locked");
+  const depositAllowance = document.getElementById("deposit-allowance");
+  const leaderboardBtn = document.getElementById("leaderboard-btn");
+  const leaderboardPanel = document.getElementById("leaderboard-panel");
+  const leaderboardRefresh = document.getElementById("leaderboard-refresh");
+  const leaderboardStatus = document.getElementById("leaderboard-status");
+  const leaderboardYourRank = document.getElementById("leaderboard-your-rank");
+  const leaderboardList = document.getElementById("leaderboard-list");
+  const statsBtn = document.getElementById("stats-btn");
+  const statsPanel = document.getElementById("stats-panel");
+  const statsRefresh = document.getElementById("stats-refresh");
+  const statsStatus = document.getElementById("stats-status");
+  const statsTotalGames = document.getElementById("stats-total-games");
+  const statsTotalWins = document.getElementById("stats-total-wins");
+  const statsTotalLosses = document.getElementById("stats-total-losses");
+  const statsTotalProfit = document.getElementById("stats-total-profit");
+  const statsJoined = document.getElementById("stats-joined");
+  const statsList = document.getElementById("stats-list");
+  const statsTabButtons = document.querySelectorAll("[data-stats-tab]");
+  const gameHelpBtn = document.getElementById("game-help-btn");
+  const gameHelpModal = document.getElementById("game-help-modal");
+  const gameHelpClose = document.getElementById("game-help-close");
+  const gameHelpGotIt = document.getElementById("game-help-got-it");
+  let depositBusy = false;
+  let startBetBusy = false;
+  let leaderboardBusy = false;
+  let leaderboardLastLoadedAt = 0;
+  let statsBusy = false;
+  let statsLastLoadedAt = 0;
+  let statsActiveTab = "runs";
+  let statsWalletKey = "";
+  const statsCache = {
+    player: null,
+    sessions: [],
+    transactions: [],
+  };
 
-  depositBtn?.addEventListener("click", () => {
+  function setDepositStatus(message, isError = false) {
+    if (!depositStatus) return;
+    depositStatus.innerText = message || "";
+    if (isError) depositStatus.classList.add("error");
+    else depositStatus.classList.remove("error");
+  }
+
+  function setDepositBusy(nextBusy) {
+    depositBusy = nextBusy;
+    if (depositConfirm) depositConfirm.disabled = nextBusy;
+    if (depositFaucet) depositFaucet.disabled = nextBusy;
+    if (depositManageFunds) {
+      if (nextBusy) {
+        depositManageFunds.setAttribute("aria-disabled", "true");
+        depositManageFunds.setAttribute("tabindex", "-1");
+        depositManageFunds.style.pointerEvents = "none";
+      } else {
+        depositManageFunds.removeAttribute("aria-disabled");
+        depositManageFunds.removeAttribute("tabindex");
+        depositManageFunds.style.pointerEvents = "";
+      }
+    }
+    if (!nextBusy) {
+      setDepositButtonState("DEPOSIT", false);
+    }
+  }
+
+  function formatDepositAmount(value, fallback = "-") {
+    if (!isFinite(value)) return fallback;
+    return "$" + Number(value).toFixed(2);
+  }
+
+  function shortWalletAddress(address) {
+    const value = String(address || "");
+    if (!value) return "-";
+    if (value.length <= 13) return value;
+    return `${value.slice(0, 6)}...${value.slice(-4)}`;
+  }
+
+  function normalizeWallet(address) {
+    return String(address || "").trim().toLowerCase();
+  }
+
+  function leaderboardBestScore(entry) {
+    const best = Number(entry?.best_score);
+    if (isFinite(best)) return best;
+    const fallback = Number(entry?.max_row_reached);
+    if (isFinite(fallback)) return fallback;
+    return 0;
+  }
+
+  function setLeaderboardStatus(message, isError = false) {
+    if (!leaderboardStatus) return;
+    leaderboardStatus.innerText = message || "";
+    if (isError) leaderboardStatus.classList.add("error");
+    else leaderboardStatus.classList.remove("error");
+  }
+
+  function toFiniteNumber(value, fallback = 0) {
+    const parsed = Number(value);
+    return isFinite(parsed) ? parsed : fallback;
+  }
+
+  function formatStatsUsd(value, { signed = false } = {}) {
+    const amount = toFiniteNumber(value, 0);
+    if (!signed) return "$" + amount.toFixed(2);
+    const sign = amount > 0 ? "+" : amount < 0 ? "-" : "";
+    return `${sign}$${Math.abs(amount).toFixed(2)}`;
+  }
+
+  function formatStatsDate(value, fallback = "-") {
+    if (!value) return fallback;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return fallback;
+    return new Intl.DateTimeFormat(undefined, {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  }
+
+  function formatJoinedText(value) {
+    if (!value) return "Joined: -";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Joined: -";
+    return (
+      "Joined: " +
+      new Intl.DateTimeFormat(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }).format(date)
+    );
+  }
+
+  function shortHash(value) {
+    const text = String(value || "");
+    if (!text) return "-";
+    if (text.length <= 13) return text;
+    return `${text.slice(0, 6)}...${text.slice(-4)}`;
+  }
+
+  function setStatsStatus(message, isError = false) {
+    if (!statsStatus) return;
+    statsStatus.innerText = message || "";
+    if (isError) statsStatus.classList.add("error");
+    else statsStatus.classList.remove("error");
+  }
+
+  function setStatsSummary(playerStats) {
+    const totalGames = toFiniteNumber(playerStats?.total_games, 0);
+    const totalWins = toFiniteNumber(playerStats?.total_wins, 0);
+    const totalLosses = toFiniteNumber(playerStats?.total_losses, 0);
+    const totalProfit = toFiniteNumber(playerStats?.total_profit, 0);
+
+    if (statsTotalGames) statsTotalGames.innerText = String(totalGames);
+    if (statsTotalWins) statsTotalWins.innerText = String(totalWins);
+    if (statsTotalLosses) statsTotalLosses.innerText = String(totalLosses);
+    if (statsJoined) statsJoined.innerText = formatJoinedText(playerStats?.created_at);
+
+    if (statsTotalProfit) {
+      statsTotalProfit.innerText = formatStatsUsd(totalProfit, { signed: true });
+      statsTotalProfit.classList.remove("positive", "negative");
+      if (totalProfit > 0) statsTotalProfit.classList.add("positive");
+      if (totalProfit < 0) statsTotalProfit.classList.add("negative");
+    }
+  }
+
+  function renderStatsEmpty(message) {
+    if (!statsList) return;
+    statsList.innerHTML = "";
+    const empty = document.createElement("p");
+    empty.className = "stats-empty";
+    empty.innerText = message;
+    statsList.appendChild(empty);
+  }
+
+  function getRunBadge(status) {
+    const normalized = String(status || "").toUpperCase();
+    if (normalized === "CASHED_OUT") {
+      return { label: "WIN", className: "win" };
+    }
+    if (normalized === "CRASHED") {
+      return { label: "CRASH", className: "loss" };
+    }
+    return { label: normalized || "RUN", className: "other" };
+  }
+
+  function getTransactionBadge(type) {
+    const normalized = String(type || "").toUpperCase();
+    if (normalized === "DEPOSIT") return { label: "DEPOSIT", className: "deposit" };
+    if (normalized === "WITHDRAW") return { label: "WITHDRAW", className: "withdraw" };
+    if (normalized === "TREASURY_FUNDED") return { label: "FAUCET", className: "deposit" };
+    if (normalized === "SESSION_STARTED") return { label: "BET", className: "start" };
+    if (normalized === "SESSION_SETTLED") return { label: "SETTLED", className: "settle" };
+    return { label: normalized || "EVENT", className: "other" };
+  }
+
+  function createStatsRow({ badge, topText, dateText, mainText, valueText, valueTone }) {
+    const row = document.createElement("div");
+    row.className = "stats-row";
+
+    const top = document.createElement("div");
+    top.className = "stats-row-top";
+
+    const meta = document.createElement("div");
+    meta.className = "stats-row-meta";
+
+    const badgeEl = document.createElement("span");
+    badgeEl.className = `stats-badge ${badge.className}`;
+    badgeEl.innerText = badge.label;
+
+    const topSubtle = document.createElement("span");
+    topSubtle.className = "stats-row-subtle";
+    topSubtle.innerText = topText;
+
+    const dateEl = document.createElement("span");
+    dateEl.className = "stats-row-date";
+    dateEl.innerText = dateText;
+
+    meta.appendChild(badgeEl);
+    meta.appendChild(topSubtle);
+    top.appendChild(meta);
+    top.appendChild(dateEl);
+
+    const bottom = document.createElement("div");
+    bottom.className = "stats-row-bottom";
+
+    const main = document.createElement("span");
+    main.className = "stats-row-main";
+    main.innerText = mainText;
+
+    const value = document.createElement("strong");
+    value.className = "stats-row-value";
+    if (valueTone) value.classList.add(valueTone);
+    value.innerText = valueText;
+
+    bottom.appendChild(main);
+    bottom.appendChild(value);
+
+    row.appendChild(top);
+    row.appendChild(bottom);
+    return row;
+  }
+
+  function renderStatsRows() {
+    if (!statsList) return;
+    statsList.innerHTML = "";
+
+    if (statsActiveTab === "txs") {
+      if (!statsCache.transactions.length) {
+        renderStatsEmpty("No transactions yet.");
+        return;
+      }
+
+      statsCache.transactions.forEach((entry) => {
+        const badge = getTransactionBadge(entry?.type);
+        const amount = toFiniteNumber(entry?.amount, 0);
+        const tone =
+          badge.className === "withdraw" || badge.className === "settle"
+            ? "positive"
+            : badge.className === "deposit" || badge.className === "start"
+              ? "negative"
+              : "";
+
+        const descriptor = entry?.onchain_session_id
+          ? `SESSION ${shortHash(entry?.onchain_session_id)}`
+          : `TX ${shortHash(entry?.tx_hash)}`;
+
+        statsList.appendChild(
+          createStatsRow({
+            badge,
+            topText: descriptor,
+            dateText: formatStatsDate(entry?.created_at),
+            mainText: `HASH ${shortHash(entry?.tx_hash)}`,
+            valueText: formatStatsUsd(amount, { signed: false }),
+            valueTone: tone,
+          })
+        );
+      });
+      return;
+    }
+
+    if (!statsCache.sessions.length) {
+      renderStatsEmpty("No completed runs yet.");
+      return;
+    }
+
+    statsCache.sessions.forEach((entry) => {
+      const badge = getRunBadge(entry?.status);
+      const stake = toFiniteNumber(entry?.stake_amount, 0);
+      const payout = toFiniteNumber(entry?.payout_amount, 0);
+      const profit = payout - stake;
+      const hops = toFiniteNumber(entry?.max_row_reached, 0);
+      const multiplier = toFiniteNumber(entry?.final_multiplier, 0);
+
+      statsList.appendChild(
+        createStatsRow({
+          badge,
+          topText: `STAKE ${formatStatsUsd(stake)}`,
+          dateText: formatStatsDate(entry?.ended_at || entry?.created_at),
+          mainText: `HOPS ${hops} / ${multiplier.toFixed(2)}x`,
+          valueText: formatStatsUsd(profit, { signed: true }),
+          valueTone: profit > 0 ? "positive" : profit < 0 ? "negative" : "",
+        })
+      );
+    });
+  }
+
+  function setStatsTab(nextTab) {
+    if (nextTab !== "runs" && nextTab !== "txs") return;
+    statsActiveTab = nextTab;
+
+    statsTabButtons.forEach((button) => {
+      const isActive = button.dataset.statsTab === nextTab;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+
+    renderStatsRows();
+  }
+
+  function renderLeaderboardRows(entries) {
+    if (!leaderboardList) return;
+    leaderboardList.innerHTML = "";
+
+    entries.forEach((entry, index) => {
+      const row = document.createElement("li");
+      row.className = "leaderboard-row";
+
+      const rankEl = document.createElement("span");
+      rankEl.className = "leaderboard-rank";
+      rankEl.innerText = `#${index + 1}`;
+
+      const walletEl = document.createElement("span");
+      walletEl.className = "leaderboard-wallet";
+      walletEl.innerText = shortWalletAddress(entry?.wallet_address);
+
+      const scoreEl = document.createElement("strong");
+      scoreEl.className = "leaderboard-score";
+      scoreEl.innerText = `HOPS ${leaderboardBestScore(entry)}`;
+
+      row.appendChild(rankEl);
+      row.appendChild(walletEl);
+      row.appendChild(scoreEl);
+      leaderboardList.appendChild(row);
+    });
+  }
+
+  async function refreshLeaderboard(forceReload = false) {
+    if (!leaderboardPanel) return;
+    if (leaderboardBusy) return;
+
+    const hasFreshCache =
+      leaderboardList &&
+      leaderboardList.children.length > 0 &&
+      Date.now() - leaderboardLastLoadedAt < 12000;
+    if (!forceReload && hasFreshCache) return;
+
+    leaderboardBusy = true;
+    if (leaderboardRefresh) leaderboardRefresh.disabled = true;
+    setLeaderboardStatus("Loading leaderboard...");
+
+    try {
+      if (!hasLiveBridge()) {
+        if (leaderboardList) leaderboardList.innerHTML = "";
+        if (leaderboardYourRank) leaderboardYourRank.innerText = "Demo mode";
+        setLeaderboardStatus("Connect wallet + backend session to view leaderboard.");
+        return;
+      }
+
+      const bridge = getBridge();
+      if (!bridge?.loadLeaderboard) {
+        throw new Error("Leaderboard bridge belum siap.");
+      }
+
+      const payload = await bridge.loadLeaderboard();
+      const leaderboard = Array.isArray(payload?.leaderboard)
+        ? [...payload.leaderboard]
+        : [];
+      leaderboard.sort(
+        (a, b) => leaderboardBestScore(b) - leaderboardBestScore(a)
+      );
+
+      const topTen = leaderboard.slice(0, 10);
+      renderLeaderboardRows(topTen);
+
+      const bridgeWallet = bridge?.getWalletAddress
+        ? bridge.getWalletAddress()
+        : "";
+      const walletAddress = String(payload?.walletAddress || bridgeWallet || "");
+      const normalizedWallet = normalizeWallet(walletAddress);
+
+      if (leaderboardYourRank) {
+        if (!normalizedWallet) {
+          leaderboardYourRank.innerText = "Wallet not found";
+        } else {
+          const rankIndex = leaderboard.findIndex(
+            (entry) =>
+              normalizeWallet(entry?.wallet_address) === normalizedWallet
+          );
+
+          if (rankIndex >= 0) {
+            const bestScore = leaderboardBestScore(leaderboard[rankIndex]);
+            leaderboardYourRank.innerText = `#${rankIndex + 1} (HOPS ${bestScore})`;
+          } else if (leaderboard.length > 0) {
+            leaderboardYourRank.innerText = "Outside Top 100";
+          } else {
+            leaderboardYourRank.innerText = "-";
+          }
+        }
+      }
+
+      if (topTen.length === 0) {
+        setLeaderboardStatus("No leaderboard data yet.");
+      } else {
+        setLeaderboardStatus("Top 10 players by best hops.");
+      }
+      leaderboardLastLoadedAt = Date.now();
+    } catch (error) {
+      if (leaderboardList) leaderboardList.innerHTML = "";
+      if (leaderboardYourRank) leaderboardYourRank.innerText = "-";
+      setLeaderboardStatus(
+        formatBridgeError(error, "Gagal memuat leaderboard."),
+        true
+      );
+    } finally {
+      leaderboardBusy = false;
+      if (leaderboardRefresh) leaderboardRefresh.disabled = false;
+    }
+  }
+
+  function openLeaderboardPanel() {
+    if (!leaderboardPanel) return;
+    closeStatsPanel();
+    leaderboardPanel.style.display = "block";
+    leaderboardPanel.setAttribute("aria-hidden", "false");
+    leaderboardBtn?.classList.add("open");
+    leaderboardBtn?.setAttribute("aria-expanded", "true");
+    void refreshLeaderboard();
+  }
+
+  function closeLeaderboardPanel() {
+    if (!leaderboardPanel) return;
+    leaderboardPanel.style.display = "none";
+    leaderboardPanel.setAttribute("aria-hidden", "true");
+    leaderboardBtn?.classList.remove("open");
+    leaderboardBtn?.setAttribute("aria-expanded", "false");
+  }
+
+  function toggleLeaderboardPanel() {
+    if (!leaderboardPanel) return;
+    const isVisible = leaderboardPanel.style.display !== "none";
+    if (isVisible) closeLeaderboardPanel();
+    else openLeaderboardPanel();
+  }
+
+  async function refreshStats(forceReload = false) {
+    if (!statsPanel) return;
+    if (statsBusy) return;
+
+    const bridge = hasLiveBridge() ? getBridge() : null;
+    const currentWalletKey = normalizeWallet(
+      bridge?.getWalletAddress ? bridge.getWalletAddress() : ""
+    );
+    const hasFreshCache =
+      statsCache.player &&
+      statsWalletKey === currentWalletKey &&
+      Date.now() - statsLastLoadedAt < 12000;
+    if (!forceReload && hasFreshCache) {
+      renderStatsRows();
+      return;
+    }
+
+    statsBusy = true;
+    if (statsRefresh) statsRefresh.disabled = true;
+    setStatsStatus("Loading player stats...");
+    renderStatsEmpty("Loading stats...");
+
+    try {
+      if (!hasLiveBridge()) {
+        statsWalletKey = "";
+        statsCache.player = null;
+        statsCache.sessions = [];
+        statsCache.transactions = [];
+        setStatsSummary(null);
+        renderStatsEmpty("Connect wallet + backend session to view stats.");
+        setStatsStatus("Connect wallet + backend session to view stats.");
+        return;
+      }
+
+      if (
+        !bridge?.loadPlayerStats ||
+        !bridge?.loadGameHistory ||
+        !bridge?.loadPlayerTransactions
+      ) {
+        throw new Error("Stats bridge belum siap.");
+      }
+
+      const [playerStats, historyPayload, transactionPayload] = await Promise.all([
+        bridge.loadPlayerStats(),
+        bridge.loadGameHistory(3),
+        bridge.loadPlayerTransactions(3),
+      ]);
+
+      statsCache.player = playerStats || null;
+      statsCache.sessions = Array.isArray(historyPayload?.sessions)
+        ? historyPayload.sessions
+        : [];
+      statsCache.transactions = Array.isArray(transactionPayload?.transactions)
+        ? transactionPayload.transactions
+        : [];
+      statsWalletKey = normalizeWallet(
+        playerStats?.wallet_address || currentWalletKey
+      );
+
+      setStatsSummary(statsCache.player);
+      renderStatsRows();
+
+      if (!statsCache.sessions.length && !statsCache.transactions.length) {
+        setStatsStatus("No player history yet.");
+      } else {
+        setStatsStatus("Recent runs and onchain activity.");
+      }
+
+      statsLastLoadedAt = Date.now();
+    } catch (error) {
+      statsWalletKey = "";
+      statsCache.player = null;
+      statsCache.sessions = [];
+      statsCache.transactions = [];
+      setStatsSummary(null);
+      renderStatsEmpty("Could not load player stats.");
+      setStatsStatus(
+        formatBridgeError(error, "Gagal memuat player stats."),
+        true
+      );
+    } finally {
+      statsBusy = false;
+      if (statsRefresh) statsRefresh.disabled = false;
+    }
+  }
+
+  function openStatsPanel() {
+    if (!statsPanel) return;
+    closeLeaderboardPanel();
+    statsPanel.style.display = "block";
+    statsPanel.setAttribute("aria-hidden", "false");
+    statsBtn?.classList.add("open");
+    statsBtn?.setAttribute("aria-expanded", "true");
+    void refreshStats();
+  }
+
+  function closeStatsPanel() {
+    if (!statsPanel) return;
+    statsPanel.style.display = "none";
+    statsPanel.setAttribute("aria-hidden", "true");
+    statsBtn?.classList.remove("open");
+    statsBtn?.setAttribute("aria-expanded", "false");
+  }
+
+  function toggleStatsPanel() {
+    if (!statsPanel) return;
+    const isVisible = statsPanel.style.display !== "none";
+    if (isVisible) closeStatsPanel();
+    else openStatsPanel();
+  }
+
+  function setDepositBalanceCard(snapshot) {
+    if (depositWalletBalance) {
+      depositWalletBalance.innerText = formatDepositAmount(snapshot?.walletBalance);
+    }
+    if (depositVaultAvailable) {
+      depositVaultAvailable.innerText = formatDepositAmount(
+        snapshot?.availableBalance,
+        "$0.00"
+      );
+    }
+    if (depositVaultLocked) {
+      depositVaultLocked.innerText = formatDepositAmount(snapshot?.lockedBalance, "$0.00");
+    }
+    if (depositAllowance) {
+      const allowance = snapshot?.allowance;
+      if (!isFinite(allowance)) depositAllowance.innerText = "-";
+      else if (allowance > 999999) depositAllowance.innerText = "Unlimited (approved)";
+      else depositAllowance.innerText = formatDepositAmount(allowance, "$0.00");
+    }
+  }
+
+  async function refreshDepositBalanceCard() {
+    if (hasLiveBridge()) {
+      const bridge = getBridge();
+      try {
+        if (bridge?.loadDepositBalances) {
+          const snapshot = await bridge.loadDepositBalances();
+          if (isFinite(snapshot?.availableBalance)) {
+            bet.balance = snapshot.availableBalance;
+            renderBalance();
+          }
+          setDepositBalanceCard(snapshot);
+          return;
+        }
+      } catch (error) {
+        console.error("Failed to load deposit balance card:", error);
+      }
+
+      try {
+        if (bridge?.loadAvailableBalance) {
+          const availableBalance = await bridge.loadAvailableBalance();
+          if (isFinite(availableBalance)) {
+            bet.balance = availableBalance;
+            renderBalance();
+          }
+          setDepositBalanceCard({
+            walletBalance: Number.NaN,
+            availableBalance,
+            lockedBalance: Number.NaN,
+            allowance: Number.NaN,
+          });
+          return;
+        }
+      } catch (error) {
+        console.error("Failed to load fallback available balance:", error);
+      }
+    }
+
+    setDepositBalanceCard({
+      walletBalance: Number.NaN,
+      availableBalance: bet.balance,
+      lockedBalance: 0,
+      allowance: Number.NaN,
+    });
+  }
+
+  function openDepositModal(presetAmount) {
+    if (depositAmount && isFinite(presetAmount) && presetAmount > 0) {
+      depositAmount.value = String(presetAmount);
+    }
+    setDepositStatus("");
+    void refreshDepositBalanceCard();
     if (depositModal) depositModal.style.display = "flex";
+  }
+
+  function closeDepositModal() {
+    if (depositBusy) return;
+    if (depositModal) depositModal.style.display = "none";
+  }
+
+  function openGameHelpModal() {
+    if (gameHelpModal) gameHelpModal.style.display = "flex";
+  }
+
+  function closeGameHelpModal() {
+    if (gameHelpModal) gameHelpModal.style.display = "none";
+  }
+
+  function isBetPanelVisible() {
+    const panel = document.getElementById("bet-panel");
+    if (!panel) return false;
+    return panel.style.display !== "none";
+  }
+
+  window.addEventListener("chicken:open-deposit-modal", (event) => {
+    const detail = event && "detail" in event ? event.detail : undefined;
+    const presetAmount = Number(detail?.amount);
+    openDepositModal(presetAmount);
+  });
+
+  leaderboardBtn?.addEventListener("click", () => {
+    toggleLeaderboardPanel();
+  });
+
+  statsBtn?.addEventListener("click", () => {
+    toggleStatsPanel();
+  });
+
+  statsTabButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      setStatsTab(button.dataset.statsTab || "runs");
+    });
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+
+    const leaderboardVisible =
+      leaderboardPanel &&
+      leaderboardBtn &&
+      leaderboardPanel.style.display !== "none";
+    if (
+      leaderboardVisible &&
+      !leaderboardPanel.contains(target) &&
+      !leaderboardBtn.contains(target)
+    ) {
+      closeLeaderboardPanel();
+    }
+
+    const statsVisible =
+      statsPanel &&
+      statsBtn &&
+      statsPanel.style.display !== "none";
+    if (
+      statsVisible &&
+      !statsPanel.contains(target) &&
+      !statsBtn.contains(target)
+    ) {
+      closeStatsPanel();
+    }
+  });
+
+  leaderboardRefresh?.addEventListener("click", () => {
+    void refreshLeaderboard(true);
+  });
+
+  statsRefresh?.addEventListener("click", () => {
+    void refreshStats(true);
+  });
+
+  gameHelpBtn?.addEventListener("click", () => {
+    openGameHelpModal();
+  });
+
+  gameHelpClose?.addEventListener("click", () => {
+    closeGameHelpModal();
+  });
+
+  gameHelpGotIt?.addEventListener("click", () => {
+    closeGameHelpModal();
+  });
+
+  gameHelpModal?.addEventListener("click", (event) => {
+    if (event.target === gameHelpModal) closeGameHelpModal();
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeGameHelpModal();
+      closeLeaderboardPanel();
+      closeStatsPanel();
+    }
+  });
+
+  window.addEventListener("chicken:deposit-progress", (event) => {
+    const detail = event && "detail" in event ? event.detail : undefined;
+    const phase = String(detail?.phase || "");
+    const message = String(detail?.message || "");
+
+    if (message) setDepositStatus(message, false);
+
+    if (phase === "done") {
+      dispatchPlayStatus({ clear: true });
+      setDepositButtonState("DEPOSIT", false);
+      return;
+    }
+
+    if (message) {
+      dispatchPlayStatus({
+        message,
+        tone: "busy",
+        sticky: true,
+      });
+    }
+
+    if (phase === "approve_sign") {
+      setDepositButtonState("SIGN 1/2", true);
+      return;
+    }
+    if (phase === "approve_pending") {
+      setDepositButtonState("PENDING...", true);
+      return;
+    }
+    if (phase === "deposit_sign") {
+      setDepositButtonState("SIGN 2/2", true);
+      return;
+    }
+    if (phase === "deposit_pending") {
+      setDepositButtonState("PENDING...", true);
+      return;
+    }
   });
 
   document.getElementById("bet-btn")?.addEventListener("click", () => {
     if (bet.active) return;
+    if (startBetBusy) return;
     hideResult();
-    showBetPanel(true);
+    showBetPanel(!isBetPanelVisible());
   });
 
-  depositConfirm?.addEventListener("click", () => {
-    const amt = parseFloat(depositAmount?.value || "0");
-    if (amt > 0) deposit(amt);
-    if (depositModal) depositModal.style.display = "none";
+  depositConfirm?.addEventListener("click", async () => {
+    const amountText = String(depositAmount?.value || "").trim();
+    const amt = parseFloat(amountText);
+    if (!isFinite(amt) || amt <= 0) {
+      setDepositStatus("Enter a valid USDC amount.", true);
+      return;
+    }
+
+    if (hasLiveBridge()) {
+      const bridge = getBridge();
+      if (!bridge?.depositToVault) {
+        setDepositStatus("Deposit bridge belum siap.", true);
+        return;
+      }
+
+      setDepositBusy(true);
+      setDepositButtonState("PROCESSING...", true);
+      setDepositStatus("Submitting deposit...");
+      try {
+        const result = await bridge.depositToVault(amountText);
+        if (isFinite(result?.availableBalance)) {
+          bet.balance = result.availableBalance;
+          renderBalance();
+        }
+
+        if (result?.approveTxHash) {
+          setDepositStatus("Approve + deposit confirmed.");
+        } else {
+          setDepositStatus("Deposit confirmed.");
+        }
+        dispatchPlayStatus({
+          message: "DEPOSIT CONFIRMED.",
+          tone: "ready",
+          durationMs: 2600,
+        });
+
+        window.setTimeout(() => {
+          closeDepositModal();
+        }, 350);
+      } catch (error) {
+        const message = formatBridgeError(error, "Deposit gagal.");
+        setDepositStatus(message, true);
+        dispatchPlayStatus({
+          message,
+          tone: "error",
+          durationMs: 4200,
+        });
+        setDepositButtonState("DEPOSIT", false);
+      } finally {
+        setDepositBusy(false);
+        void loadBalance();
+        void refreshDepositBalanceCard();
+      }
+      return;
+    }
+
+    const success = deposit(amt);
+    if (success) {
+      void refreshDepositBalanceCard();
+      closeDepositModal();
+    } else setDepositStatus("Deposit gagal.", true);
   });
 
-  depositCancel?.addEventListener("click", () => {
-    if (depositModal) depositModal.style.display = "none";
+  depositFaucet?.addEventListener("click", async () => {
+    if (hasLiveBridge()) {
+      const bridge = getBridge();
+      if (!bridge?.claimFaucet) {
+        setDepositStatus("Faucet bridge belum siap.", true);
+        return;
+      }
+
+      setDepositBusy(true);
+      setDepositButtonState("CLAIMING...", true);
+      setDepositStatus("Claiming faucet...");
+      dispatchPlayStatus({
+        message: "CLAIMING FAUCET...",
+        tone: "busy",
+        sticky: true,
+      });
+      try {
+        await bridge.claimFaucet();
+        setDepositStatus("Faucet claimed. Lanjut deposit ya.");
+        dispatchPlayStatus({
+          message: "FAUCET CLAIMED.",
+          tone: "ready",
+          durationMs: 2600,
+        });
+        setDepositButtonState("DEPOSIT", false);
+      } catch (error) {
+        const message = formatBridgeError(error, "Claim faucet gagal.");
+        setDepositStatus(message, true);
+        dispatchPlayStatus({
+          message,
+          tone: "error",
+          durationMs: 4200,
+        });
+        setDepositButtonState("DEPOSIT", false);
+      } finally {
+        setDepositBusy(false);
+        void loadBalance();
+        void refreshDepositBalanceCard();
+      }
+      return;
+    }
+
+    deposit(100);
+    void refreshDepositBalanceCard();
+    setDepositStatus("Mock +$100 added.");
   });
 
   document.getElementById("deposit-close")?.addEventListener("click", () => {
-    if (depositModal) depositModal.style.display = "none";
+    closeDepositModal();
   });
 
   document.getElementById("bet-panel-close")?.addEventListener("click", () => {
@@ -1691,21 +2839,99 @@ function initBettingUI() {
     });
   });
 
-  document.getElementById("start-bet-btn")?.addEventListener("click", () => {
+  function showErrorToast(msg) {
+    const panel = document.getElementById("bet-panel");
+    if (!panel) return;
+    let toast = document.getElementById("bet-toast");
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.id = "bet-toast";
+      toast.className = "flow-alert";
+      toast.style.marginTop = "10px";
+      toast.style.marginBottom = "10px";
+      const btnContainer = document.getElementById("start-bet-btn")?.parentElement;
+      if (btnContainer && btnContainer.parentNode) {
+        btnContainer.parentNode.insertBefore(toast, btnContainer);
+      } else {
+        panel.appendChild(toast);
+      }
+    }
+    toast.innerText = msg;
+    toast.style.display = "block";
+    setTimeout(() => {
+      toast.style.display = "none";
+    }, 3000);
+  }
+
+  const startBetBtn = document.getElementById("start-bet-btn");
+  startBetBtn?.addEventListener("click", async () => {
+    if (startBetBusy) return;
     const stake = parseFloat(stakeInput?.value || "0");
     if (!isFinite(stake) || stake <= 0) {
-      alert("Enter a valid stake amount");
+      showErrorToast("Enter a valid stake amount");
       return;
     }
     if (!hasLiveBridge() && stake > bet.balance) {
-      alert(
+      showErrorToast(
         `Insufficient balance. You have $${bet.balance.toFixed(
           2
         )}. Deposit more first.`
       );
       return;
     }
-    void startBet(stake);
+
+    if (hasLiveBridge()) {
+      const bridge = getBridge();
+      if (bridge?.loadAvailableBalance) {
+        try {
+          const available = await bridge.loadAvailableBalance();
+          if (!isFinite(available) || available < stake) {
+            showErrorToast(
+              `Vault balance kurang. Available $${(available || 0).toFixed(
+                2
+              )}. Deposit dulu.`
+            );
+            return;
+          }
+        } catch {
+          // Lanjutkan ke startBet; error detail akan ditangkap di bawah.
+        }
+      }
+    }
+
+    startBetBusy = true;
+    let keepStatusMessage = false;
+    dispatchPlayStatus({
+      message: "STARTING BET...",
+      tone: "busy",
+      sticky: true,
+    });
+    if (startBetBtn) {
+      startBetBtn.innerText = "STARTING...";
+      startBetBtn.disabled = true;
+    }
+
+    try {
+      const started = await startBet(stake);
+      if (!started) {
+        keepStatusMessage = true;
+        showErrorToast("Start bet gagal. Cek saldo vault / koneksi wallet.");
+        dispatchPlayStatus({
+          message: "START BET FAILED. CHECK VAULT BALANCE.",
+          tone: "error",
+          durationMs: 4200,
+        });
+      }
+    } finally {
+      startBetBusy = false;
+      if (startBetBtn) {
+        startBetBtn.innerText = "START BET";
+        startBetBtn.disabled = false;
+      }
+      if (!bet.active && !keepStatusMessage) {
+        dispatchPlayStatus({ clear: true });
+      }
+    }
   });
 
   document.getElementById("free-play-btn")?.addEventListener("click", () => {
@@ -1713,6 +2939,7 @@ function initBettingUI() {
     showBetPanel(false);
     stopBetTicker();
     bet.active = false;
+    setBetButtonState();
     initializeGame();
   });
 
@@ -1725,16 +2952,110 @@ function initBettingUI() {
     showBetPanel(true);
     stopBetTicker();
     bet.active = false;
+    setBetButtonState();
     initializeGame();
   });
 
   showBetPanel(true);
+  setBetButtonState();
+  setDepositButtonState("DEPOSIT", false);
+  setStatsSummary(null);
+  setStatsTab("runs");
 
   window.addEventListener("chicken:game-error", (event) => {
     const message = event?.detail?.message;
     if (message) {
       console.error("Backend game error:", message);
+      dispatchPlayStatus({
+        message,
+        tone: "error",
+        durationMs: 4200,
+      });
+      showErrorToast(message);
     }
+  });
+
+  window.addEventListener("chicken:start-bet-failed", (event) => {
+    const message =
+      event?.detail?.message || "Start bet gagal. Silakan coba lagi.";
+
+    const wasBetActive = bet.active;
+    stopBetTicker();
+    bet.active = false;
+    bet.reconnecting = false;
+    bet.cashoutWindow = false;
+    bet.segmentActive = false;
+    bet.cpStayRemainingMs = 0;
+    bet.isDecaying = false;
+    setBetButtonState();
+    renderBetHud();
+    showBetHud(false);
+    if (!wasBetActive) {
+      showBetPanel(true);
+    } else {
+      showBetPanel(false);
+    }
+    dispatchPlayStatus({
+      message,
+      tone: "error",
+      durationMs: 4200,
+    });
+    showErrorToast(message);
+    void loadBalance();
+  });
+
+  window.addEventListener("chicken:game-disconnected", () => {
+    if (!bet.active) return;
+
+    pauseActiveBetForReconnect();
+    dispatchPlayStatus({
+      message: "RUN PAUSED. RECONNECTING...",
+      tone: "busy",
+      sticky: true,
+    });
+  });
+
+  window.addEventListener("chicken:game-reconnected", (event) => {
+    const restored = restoreActiveBetFromSnapshot(event?.detail);
+    if (!restored) return;
+
+    dispatchPlayStatus({
+      message: "RUN RECONNECTED.",
+      tone: "ready",
+      durationMs: 2600,
+    });
+  });
+
+  window.addEventListener("chicken:game-reconnect-expired", (event) => {
+    const message =
+      event?.detail?.message ||
+      "Koneksi ke server terlalu lama putus. Run dihentikan.";
+
+    resetBetAfterReconnectFailure();
+    initializeGame();
+    showBetPanel(true);
+    dispatchPlayStatus({
+      message,
+      tone: "error",
+      durationMs: 4200,
+    });
+    showErrorToast(message);
+    void loadBalance();
+  });
+
+  window.addEventListener("chicken:cp-expired", (event) => {
+    // Backend closed the CP window — update local state and HUD
+    bet.cashoutWindow = false;
+    bet.cpStayRemainingMs = 0;
+    bet.isDecaying = false;
+    renderBetHud();
+    const msg = event?.detail?.message || "Checkpoint window expired — keep moving!";
+    dispatchPlayStatus({
+      message: msg,
+      tone: "info",
+      durationMs: 3200,
+    });
+    showErrorToast("⏰ " + msg);
   });
 }
 

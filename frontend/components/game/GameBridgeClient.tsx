@@ -5,20 +5,23 @@ import { io, type Socket } from "socket.io-client";
 import { formatUnits, isAddress, parseUnits } from "viem";
 import type { Address, Hash } from "viem";
 import {
-  getAccount,
   readContract,
   waitForTransactionReceipt,
   writeContract,
 } from "@wagmi/core";
 import { useWallet } from "../web3/WalletProvider";
-import { backendPost } from "../../lib/backend/api";
+import { backendPost, backendFetch } from "../../lib/backend/api";
 import { BACKEND_API_URL, hasBackendApiConfig } from "../../lib/backend/config";
 import {
+  ERC20_ABI,
   GAME_SETTLEMENT_ABI,
   GAME_SETTLEMENT_ADDRESS,
   GAME_VAULT_ABI,
   GAME_VAULT_ADDRESS,
+  USDC_ADDRESS,
   USDC_DECIMALS,
+  USDC_FAUCET_ABI,
+  USDC_FAUCET_ADDRESS,
   hasGameContractConfig,
 } from "../../lib/web3/contracts";
 import { wagmiConfig } from "../../lib/web3/wagmiConfig";
@@ -47,15 +50,32 @@ type SettlementPayload = {
   reason?: string;
 };
 
+type ReconnectedPayload = {
+  sessionId: string;
+  onchainSessionId: string;
+  stake: number;
+  stakeAmountUnits: string;
+  row: number;
+  maxRow: number;
+  multiplierBp: number;
+  multiplier: string;
+  cp: number;
+  cashoutWindow: boolean;
+  segmentRemainingMs: number;
+  cpStayRemainingMs: number;
+  decayBp: number;
+  serverTime: number;
+};
+
 type PendingResolver<T> = {
   resolve: (value: T) => void;
   reject: (reason?: unknown) => void;
   timeoutId: number;
 };
 
-const ZERO_HASH =
-  "0x0000000000000000000000000000000000000000000000000000000000000000";
 const RESPONSE_TIMEOUT_MS = 45_000;
+const RECONNECT_GRACE_TIMEOUT_MS = 32_000;
+const APPROVE_MAX_USDC_UNITS = parseUnits("10000000", USDC_DECIMALS);
 
 function normalizeError(error: unknown, fallback: string) {
   if (error && typeof error === "object" && "message" in error) {
@@ -64,17 +84,64 @@ function normalizeError(error: unknown, fallback: string) {
   return fallback;
 }
 
+function isUserRejectedRequestError(error: unknown) {
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String((error as { name?: string }).name || "").toLowerCase()
+      : "";
+  const message = normalizeError(error, "").toLowerCase();
+  const combined = `${name} ${message}`;
+
+  return (
+    combined.includes("userrejectedrequesterror") ||
+    combined.includes("user rejected") ||
+    combined.includes("rejected the request") ||
+    combined.includes("user denied")
+  );
+}
+
+function shouldAbortStartSessionOnReceiptError(error: unknown) {
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String((error as { name?: string }).name || "").toLowerCase()
+      : "";
+  const message = normalizeError(error, "").toLowerCase();
+  const combined = `${name} ${message}`;
+
+  const uncertainPatterns = [
+    "timeout",
+    "timed out",
+    "not found",
+    "pending",
+    "network",
+    "fetch",
+    "socket",
+    "disconnect",
+    "rate limit",
+    "429",
+    "rpc",
+    "temporary",
+  ];
+
+  return !uncertainPatterns.some((pattern) => combined.includes(pattern));
+}
+
 function toNumberAmount(value: bigint) {
   return Number(formatUnits(value, USDC_DECIMALS));
 }
 
-function rejectPendingRequest<T>(pending: PendingResolver<T> | null, message: string) {
+function rejectPendingRequest<T>(
+  pending: PendingResolver<T> | null,
+  message: string,
+) {
   if (!pending) return;
   window.clearTimeout(pending.timeoutId);
   pending.reject(new Error(message));
 }
 
-export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientProps) {
+export function GameBridgeClient({
+  backgroundMode = false,
+}: GameBridgeClientProps) {
   const {
     account,
     isMonadChain,
@@ -85,16 +152,62 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
   const socketRef = useRef<Socket | null>(null);
   const activeSessionIdRef = useRef<string>("");
   const pendingStartRef = useRef<PendingResolver<StartedPayload> | null>(null);
-  const pendingCashoutRef = useRef<PendingResolver<SettlementPayload> | null>(null);
-  const pendingCrashRef = useRef<PendingResolver<SettlementPayload> | null>(null);
+  const pendingCashoutRef = useRef<PendingResolver<SettlementPayload> | null>(
+    null,
+  );
+  const pendingCrashRef = useRef<PendingResolver<SettlementPayload> | null>(
+    null,
+  );
+  const reconnectTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (backgroundMode) {
       window.__CHICKEN_MONAD_BRIDGE__ = {
         backgroundMode: true,
         loadAvailableBalance: async () => 0,
-        openDeposit: () => {
-          window.location.href = "/deposit";
+        loadDepositBalances: async () => ({
+          walletBalance: 0,
+          availableBalance: 0,
+          lockedBalance: 0,
+          allowance: 0,
+        }),
+        loadLeaderboard: async () => ({
+          leaderboard: [],
+          walletAddress: "",
+        }),
+        loadPlayerStats: async () => ({
+          wallet_address: "",
+          total_games: 0,
+          total_wins: 0,
+          total_losses: 0,
+          total_profit: 0,
+          created_at: null,
+        }),
+        loadGameHistory: async (limit = 3) => ({
+          sessions: [],
+          total: 0,
+          limit,
+          offset: 0,
+        }),
+        loadPlayerTransactions: async (limit = 3) => ({
+          transactions: [],
+          total: 0,
+          limit,
+          offset: 0,
+        }),
+        getWalletAddress: () => "",
+        openDeposit: (presetAmount?: number) => {
+          window.dispatchEvent(
+            new CustomEvent("chicken:open-deposit-modal", {
+              detail: { amount: presetAmount },
+            }),
+          );
+        },
+        claimFaucet: async () => {
+          throw new Error("Background mode tidak mendukung faucet claim.");
+        },
+        depositToVault: async () => {
+          throw new Error("Background mode tidak mendukung deposit.");
         },
         startBet: async () => {
           throw new Error("Background mode tidak mendukung start bet.");
@@ -104,6 +217,7 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
           throw new Error("Background mode tidak mendukung cash out.");
         },
         crash: async () => null,
+        autoSettlePending: async () => false,
       };
 
       return () => {
@@ -134,6 +248,25 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
         pending.resolve(payload);
       });
 
+      socket.on("game:reconnected", (payload: ReconnectedPayload) => {
+        const expectedSessionId = activeSessionIdRef.current;
+        if (!expectedSessionId || payload.sessionId !== expectedSessionId) {
+          return;
+        }
+
+        if (reconnectTimeoutRef.current) {
+          window.clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+
+        activeSessionIdRef.current = payload.sessionId;
+        window.dispatchEvent(
+          new CustomEvent("chicken:game-reconnected", {
+            detail: payload,
+          }),
+        );
+      });
+
       socket.on("game:cashout_result", (payload: SettlementPayload) => {
         const pending = pendingCashoutRef.current;
         if (!pending) return;
@@ -152,6 +285,18 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
         pending.resolve(payload);
       });
 
+      socket.on("game:start_aborted", (payload: { message?: string }) => {
+        activeSessionIdRef.current = "";
+        const message =
+          payload?.message ||
+          "Transaksi startSession gagal/revert. Silakan start bet ulang.";
+        window.dispatchEvent(
+          new CustomEvent("chicken:start-bet-failed", {
+            detail: { message },
+          }),
+        );
+      });
+
       socket.on("game:error", (payload: { message?: string }) => {
         const message = payload?.message || "Backend game error.";
         rejectPendingRequest(pendingStartRef.current, message);
@@ -160,12 +305,89 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
         pendingStartRef.current = null;
         pendingCashoutRef.current = null;
         pendingCrashRef.current = null;
-        window.dispatchEvent(new CustomEvent("chicken:game-error", { detail: { message } }));
+        window.dispatchEvent(
+          new CustomEvent("chicken:game-error", { detail: { message } }),
+        );
+      });
+
+      socket.on("error", (payload: { message?: string } | string) => {
+        const message =
+          typeof payload === "string"
+            ? payload
+            : payload?.message || "Socket error dari backend.";
+
+        rejectPendingRequest(pendingStartRef.current, message);
+        rejectPendingRequest(pendingCashoutRef.current, message);
+        rejectPendingRequest(pendingCrashRef.current, message);
+        pendingStartRef.current = null;
+        pendingCashoutRef.current = null;
+        pendingCrashRef.current = null;
+        window.dispatchEvent(
+          new CustomEvent("chicken:game-error", { detail: { message } }),
+        );
+      });
+
+      socket.on("disconnect", (reason) => {
+        if (reconnectTimeoutRef.current) {
+          window.clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+
+        const message =
+          reason === "io server disconnect"
+            ? "Socket diputus server. Sign in backend lagi lalu coba start bet."
+            : `Socket disconnected: ${reason}`;
+
+        rejectPendingRequest(pendingStartRef.current, message);
+        rejectPendingRequest(pendingCashoutRef.current, message);
+        rejectPendingRequest(pendingCrashRef.current, message);
+        pendingStartRef.current = null;
+        pendingCashoutRef.current = null;
+        pendingCrashRef.current = null;
+
+        if (!activeSessionIdRef.current) {
+          return;
+        }
+
+        if (reason === "io server disconnect") {
+          const expiredMessage =
+            "Run pause gagal dipulihkan karena socket diputus server. Sign in backend lagi lalu start ulang.";
+          activeSessionIdRef.current = "";
+          window.dispatchEvent(
+            new CustomEvent("chicken:game-reconnect-expired", {
+              detail: { message: expiredMessage },
+            }),
+          );
+          return;
+        }
+
+        window.dispatchEvent(
+          new CustomEvent("chicken:game-disconnected", {
+            detail: { message },
+          }),
+        );
+
+        reconnectTimeoutRef.current = window.setTimeout(() => {
+          reconnectTimeoutRef.current = null;
+          if (!activeSessionIdRef.current) return;
+
+          activeSessionIdRef.current = "";
+          window.dispatchEvent(
+            new CustomEvent("chicken:game-reconnect-expired", {
+              detail: {
+                message:
+                  "Koneksi ke server terlalu lama putus. Run dianggap berakhir dan akan disinkronkan saat kamu mulai lagi.",
+              },
+            }),
+          );
+        }, RECONNECT_GRACE_TIMEOUT_MS);
       });
 
       socket.on("game:cp_expired", (payload: { message?: string }) => {
         window.dispatchEvent(
-          new CustomEvent("chicken:cp-expired", { detail: { message: payload?.message || "" } })
+          new CustomEvent("chicken:cp-expired", {
+            detail: { message: payload?.message || "" },
+          }),
         );
       });
 
@@ -200,7 +422,9 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
       });
     }
 
-    function createPendingRequest<T>(ref: React.MutableRefObject<PendingResolver<T> | null>) {
+    function createPendingRequest<T>(
+      ref: React.MutableRefObject<PendingResolver<T> | null>,
+    ) {
       return new Promise<T>((resolve, reject) => {
         const timeoutId = window.setTimeout(() => {
           ref.current = null;
@@ -211,7 +435,15 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
       });
     }
 
-    async function requireReadyWallet() {
+    function emitDepositProgress(phase: string, message?: string) {
+      window.dispatchEvent(
+        new CustomEvent("chicken:deposit-progress", {
+          detail: { phase, message: message || "" },
+        }),
+      );
+    }
+
+    async function requireOnchainWallet() {
       if (!account || !isAddress(account)) {
         throw new Error("Connect wallet dulu sebelum main.");
       }
@@ -221,16 +453,47 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
       if (!hasGameContractConfig()) {
         throw new Error("Config contract frontend belum lengkap.");
       }
+      return account as Address;
+    }
+
+    async function requireReadyGameWallet() {
+      const playerAddress = await requireOnchainWallet();
       if (!hasBackendConfig) {
         throw new Error("Config backend frontend belum lengkap.");
       }
 
       const authOkay = await ensureBackendSession();
       if (!authOkay) {
-        throw new Error("Backend session belum aktif. Sign in ke backend dulu.");
+        throw new Error(
+          "Backend session belum aktif. Sign in ke backend dulu.",
+        );
+      }
+
+      return playerAddress;
+    }
+
+    async function requireBackendWalletSession() {
+      if (!account || !isAddress(account)) {
+        throw new Error("Connect wallet dulu untuk melihat player stats.");
+      }
+      if (!hasBackendConfig) {
+        throw new Error("Config backend frontend belum lengkap.");
+      }
+
+      const authOkay = await ensureBackendSession();
+      if (!authOkay) {
+        throw new Error(
+          "Backend session belum aktif. Connect wallet lalu sign in dulu.",
+        );
       }
 
       return account as Address;
+    }
+
+    function normalizeHistoryLimit(limit: number | undefined, fallback = 3) {
+      const parsed = Number(limit);
+      if (!Number.isFinite(parsed)) return fallback;
+      return Math.max(1, Math.min(Math.floor(parsed), 20));
     }
 
     async function readAvailableBalance(address: Address) {
@@ -244,7 +507,42 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
       return toNumberAmount(value);
     }
 
-    async function writeAndConfirm(request: Parameters<typeof writeContract>[1]) {
+    async function readLockedBalance(address: Address) {
+      const value = await readContract(wagmiConfig, {
+        address: GAME_VAULT_ADDRESS as Address,
+        abi: GAME_VAULT_ABI,
+        functionName: "lockedBalanceOf",
+        args: [address],
+      });
+
+      return toNumberAmount(value);
+    }
+
+    async function readWalletUsdcBalance(address: Address) {
+      const value = await readContract(wagmiConfig, {
+        address: USDC_ADDRESS as Address,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [address],
+      });
+
+      return toNumberAmount(value);
+    }
+
+    async function readUsdcAllowance(owner: Address) {
+      const value = await readContract(wagmiConfig, {
+        address: USDC_ADDRESS as Address,
+        abi: ERC20_ABI,
+        functionName: "allowance",
+        args: [owner, GAME_VAULT_ADDRESS as Address],
+      });
+
+      return value;
+    }
+
+    async function writeAndConfirm(
+      request: Parameters<typeof writeContract>[1],
+    ) {
       const txHash = await writeContract(wagmiConfig, request);
       await waitForTransactionReceipt(wagmiConfig, { hash: txHash as Hash });
       return txHash as string;
@@ -260,14 +558,296 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
         await refreshBackendSession();
         return readAvailableBalance(account as Address);
       },
+      loadDepositBalances: async () => {
+        if (!account || !isAddress(account) || !hasGameContractConfig()) {
+          return {
+            walletBalance: 0,
+            availableBalance: 0,
+            lockedBalance: 0,
+            allowance: 0,
+          };
+        }
+
+        const address = account as Address;
+        await refreshBackendSession();
+
+        const [
+          walletBalance,
+          availableBalance,
+          lockedBalance,
+          allowanceUnits,
+        ] = await Promise.all([
+          readWalletUsdcBalance(address),
+          readAvailableBalance(address),
+          readLockedBalance(address),
+          readUsdcAllowance(address),
+        ]);
+
+        return {
+          walletBalance,
+          availableBalance,
+          lockedBalance,
+          allowance: toNumberAmount(allowanceUnits),
+        };
+      },
+      loadLeaderboard: async () => {
+        if (!hasBackendConfig) {
+          throw new Error("Config backend frontend belum lengkap.");
+        }
+
+        const payload = await backendFetch<{
+          leaderboard?: ChickenBridgeLeaderboardEntry[];
+        }>("/api/leaderboard");
+
+        return {
+          leaderboard: Array.isArray(payload?.leaderboard)
+            ? payload.leaderboard
+            : [],
+          walletAddress: account && isAddress(account) ? account : "",
+        };
+      },
+      loadPlayerStats: async () => {
+        await requireBackendWalletSession();
+        return backendFetch<ChickenBridgePlayerStats>("/api/player/stats");
+      },
+      loadGameHistory: async (limit = 3) => {
+        await requireBackendWalletSession();
+
+        const safeLimit = normalizeHistoryLimit(limit);
+        const payload = await backendFetch<ChickenBridgeGameHistoryPayload>(
+          `/api/game/history?limit=${safeLimit}&offset=0`,
+        );
+
+        return {
+          sessions: Array.isArray(payload?.sessions) ? payload.sessions : [],
+          total: Number(payload?.total || 0),
+          limit: Number(payload?.limit || safeLimit),
+          offset: Number(payload?.offset || 0),
+        };
+      },
+      loadPlayerTransactions: async (limit = 3) => {
+        await requireBackendWalletSession();
+
+        const safeLimit = normalizeHistoryLimit(limit);
+        const payload = await backendFetch<ChickenBridgePlayerTransactionsPayload>(
+          `/api/player/transactions?limit=${safeLimit}&offset=0`,
+        );
+
+        return {
+          transactions: Array.isArray(payload?.transactions)
+            ? payload.transactions
+            : [],
+          total: Number(payload?.total || 0),
+          limit: Number(payload?.limit || safeLimit),
+          offset: Number(payload?.offset || 0),
+        };
+      },
+      getWalletAddress: () =>
+        account && isAddress(account) ? account : "",
       openDeposit: (presetAmount?: number) => {
-        const target = Number.isFinite(presetAmount)
-          ? `/deposit?amount=${encodeURIComponent(String(presetAmount))}`
-          : "/deposit";
-        window.location.href = target;
+        window.dispatchEvent(
+          new CustomEvent("chicken:open-deposit-modal", {
+            detail: { amount: presetAmount },
+          }),
+        );
+      },
+      claimFaucet: async () => {
+        const playerAddress = await requireOnchainWallet();
+        if (!isAddress(USDC_FAUCET_ADDRESS)) {
+          throw new Error("Config faucet contract belum valid.");
+        }
+
+        const txHash = await writeAndConfirm({
+          address: USDC_FAUCET_ADDRESS as Address,
+          abi: USDC_FAUCET_ABI,
+          functionName: "claim",
+        });
+
+        return {
+          txHash,
+          walletBalance: await readWalletUsdcBalance(playerAddress),
+        };
+      },
+      depositToVault: async (amountInput: number | string) => {
+        const playerAddress = await requireOnchainWallet();
+
+        if (!isAddress(USDC_ADDRESS) || !isAddress(GAME_VAULT_ADDRESS)) {
+          throw new Error("Config USDC/Vault contract belum valid.");
+        }
+
+        const normalizedAmount = String(amountInput || "").trim();
+        let amountUnits: bigint;
+        try {
+          amountUnits = parseUnits(normalizedAmount, USDC_DECIMALS);
+        } catch {
+          throw new Error("Amount deposit tidak valid.");
+        }
+
+        if (amountUnits <= 0n) {
+          throw new Error("Amount deposit harus lebih dari 0.");
+        }
+
+        emitDepositProgress(
+          "checking",
+          "Checking wallet balance and allowance...",
+        );
+
+        const walletBalanceUnits = await readContract(wagmiConfig, {
+          address: USDC_ADDRESS as Address,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [playerAddress],
+        });
+
+        if (walletBalanceUnits < amountUnits) {
+          throw new Error("Saldo wallet USDC kurang. Claim faucet dulu.");
+        }
+
+        let approveTxHash: string | undefined;
+        const allowance = await readUsdcAllowance(playerAddress);
+        if (allowance < amountUnits) {
+          emitDepositProgress(
+            "approve_sign",
+            "Sign 1/2: approve max USDC for vault.",
+          );
+          approveTxHash = (await writeContract(wagmiConfig, {
+            address: USDC_ADDRESS as Address,
+            abi: ERC20_ABI,
+            functionName: "approve",
+            args: [GAME_VAULT_ADDRESS as Address, APPROVE_MAX_USDC_UNITS],
+          })) as string;
+          emitDepositProgress(
+            "approve_pending",
+            "Approve tx submitted. Waiting confirmation...",
+          );
+          await waitForTransactionReceipt(wagmiConfig, {
+            hash: approveTxHash as Hash,
+          });
+        }
+
+        emitDepositProgress("deposit_sign", "Sign 2/2: deposit USDC to vault.");
+        const depositTxHash = (await writeContract(wagmiConfig, {
+          address: GAME_VAULT_ADDRESS as Address,
+          abi: GAME_VAULT_ABI,
+          functionName: "deposit",
+          args: [amountUnits],
+        })) as string;
+        emitDepositProgress(
+          "deposit_pending",
+          "Deposit tx submitted. Waiting confirmation...",
+        );
+        await waitForTransactionReceipt(wagmiConfig, {
+          hash: depositTxHash as Hash,
+        });
+        emitDepositProgress("done", "Deposit confirmed.");
+
+        return {
+          approveTxHash,
+          depositTxHash,
+          availableBalance: await readAvailableBalance(playerAddress),
+        };
+      },
+      autoSettlePending: async () => {
+        await requireReadyGameWallet();
+
+        // 1. Cek apakah ada settlement yang tertunda di backend (sudah sign tapi belum submit ke chain)
+        let pending: { hasPending: boolean; pendingSettlements: any[] };
+        try {
+          pending = await backendFetch<{
+            hasPending: boolean;
+            pendingSettlements: any[];
+          }>("/api/game/pending-settlement");
+        } catch (err) {
+          console.error("❌ Gagal fetch pending settlement:", err);
+          return false;
+        }
+
+        if (!pending.hasPending || pending.pendingSettlements.length === 0) {
+          return false;
+        }
+
+        console.log(
+          `🧹 Auto-settling ${pending.pendingSettlements.length} pending session(s)...`,
+        );
+
+        let settledCount = 0;
+        let failedCount = 0;
+
+        for (const s of pending.pendingSettlements) {
+          try {
+            const resolution = s.resolution || s.payload;
+            const signature = s.settlement_signature || s.signature;
+
+            if (!resolution || !signature) {
+              failedCount += 1;
+              continue;
+            }
+
+            emitDepositProgress(
+              "settle_sign",
+              `Settling old session ${s.onchain_session_id.slice(0, 8)}...`,
+            );
+
+            const txHash = await writeAndConfirm({
+              address: GAME_SETTLEMENT_ADDRESS as Address,
+              abi: GAME_SETTLEMENT_ABI,
+              functionName: "settleWithSignature",
+              args: [resolution, signature as `0x${string}`],
+            });
+
+            await backendPost("/api/game/clear-settlement", {
+              sessionId: s.session_id,
+              txHash,
+            });
+            console.log(`✅ Old session ${s.session_id} settled: ${txHash}`);
+            settledCount += 1;
+          } catch (err) {
+            if (isUserRejectedRequestError(err)) {
+              emitDepositProgress(
+                "settle_cancelled",
+                "Settlement dibatalkan di wallet. Start bet dihentikan.",
+              );
+              throw new Error(
+                "Kamu cancel sign settlement session lama. Selesaikan dulu settlement itu lalu klik Start Bet lagi.",
+              );
+            }
+
+            console.error(`❌ Gagal settle old session ${s.session_id}:`, err);
+            failedCount += 1;
+          }
+        }
+
+        if (failedCount > 0) {
+          emitDepositProgress(
+            "settle_incomplete",
+            `${failedCount} pending settlement belum berhasil disettle.`,
+          );
+          throw new Error(
+            `${failedCount} pending settlement belum berhasil disettle. Coba lagi sebelum start bet.`,
+          );
+        }
+
+        emitDepositProgress("done", "All pending sessions cleared.");
+        return settledCount > 0;
       },
       startBet: async (stake: number) => {
-        const playerAddress = await requireReadyWallet();
+        await requireReadyGameWallet();
+
+        // --- AUTO SETTLE CHECK ---
+        try {
+          const bridge = window.__CHICKEN_MONAD_BRIDGE__;
+          if (bridge?.autoSettlePending) {
+            await bridge.autoSettlePending();
+          }
+        } catch (err) {
+          throw new Error(
+            normalizeError(
+              err,
+              "Pending settlement belum selesai. Selesaikan dulu sebelum start bet baru.",
+            ),
+          );
+        }
+
         const socket = ensureSocket();
         await waitForSocketReady(socket);
 
@@ -278,28 +858,59 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
         try {
           payload = await pendingStart;
         } catch (error) {
-          throw new Error(normalizeError(error, "Gagal memulai game di backend."));
+          throw new Error(
+            normalizeError(error, "Gagal memulai game di backend."),
+          );
         }
 
         try {
-          const txHash = await writeAndConfirm({
+          const txHash = (await writeContract(wagmiConfig, {
             address: GAME_SETTLEMENT_ADDRESS as Address,
             abi: GAME_SETTLEMENT_ABI,
             functionName: "startSession",
-            args: [payload.onchainSessionId as `0x${string}`, BigInt(payload.stakeAmountUnits)],
-          });
+            args: [
+              payload.onchainSessionId as `0x${string}`,
+              BigInt(payload.stakeAmountUnits),
+            ],
+          })) as string;
 
           activeSessionIdRef.current = payload.sessionId;
+
+          void waitForTransactionReceipt(wagmiConfig, {
+            hash: txHash as Hash,
+          }).catch((error) => {
+            const shouldAbort = shouldAbortStartSessionOnReceiptError(error);
+
+            if (shouldAbort) {
+              socket.emit("game:abort_start", {
+                sessionId: payload.sessionId,
+                txHash,
+              });
+              return;
+            }
+
+            window.dispatchEvent(
+              new CustomEvent("chicken:game-error", {
+                detail: {
+                  message:
+                    "Konfirmasi startSession masih pending/network issue. Jangan refresh; cek tx di wallet explorer.",
+                },
+              }),
+            );
+          });
+
           return {
             sessionId: payload.sessionId,
             onchainSessionId: payload.onchainSessionId,
             stake,
-            availableBalance: await readAvailableBalance(playerAddress),
+            availableBalance: Number.NaN,
             txHash,
           };
         } catch (error) {
           socket.emit("game:abort_start", { sessionId: payload.sessionId });
-          throw new Error(normalizeError(error, "Transaksi startSession gagal."));
+          throw new Error(
+            normalizeError(error, "Transaksi startSession gagal."),
+          );
         }
       },
       sendMove: (direction: string) => {
@@ -308,7 +919,7 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
         socket.emit("game:move", { direction });
       },
       cashOut: async () => {
-        const playerAddress = await requireReadyWallet();
+        const playerAddress = await requireReadyGameWallet();
         const socket = ensureSocket();
         await waitForSocketReady(socket);
 
@@ -349,7 +960,7 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
         };
       },
       crash: async (reason?: string) => {
-        const playerAddress = await requireReadyWallet();
+        const playerAddress = await requireReadyGameWallet();
         const socket = ensureSocket();
         await waitForSocketReady(socket);
 
@@ -397,6 +1008,10 @@ export function GameBridgeClient({ backgroundMode = false }: GameBridgeClientPro
       pendingStartRef.current = null;
       pendingCashoutRef.current = null;
       pendingCrashRef.current = null;
+      if (reconnectTimeoutRef.current) {
+        window.clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;

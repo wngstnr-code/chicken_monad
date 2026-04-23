@@ -31,14 +31,104 @@ type ChickenBridgeSettlementResult = {
   reason?: string;
 };
 
+type ChickenBridgeFaucetResult = {
+  txHash: string;
+  walletBalance: number;
+};
+
+type ChickenBridgeDepositResult = {
+  approveTxHash?: string;
+  depositTxHash: string;
+  availableBalance: number;
+};
+
+type ChickenBridgeDepositBalances = {
+  walletBalance: number;
+  availableBalance: number;
+  lockedBalance: number;
+  allowance: number;
+};
+
+type ChickenBridgeLeaderboardEntry = {
+  wallet_address: string;
+  best_score?: number;
+  max_row_reached?: number;
+  games_played?: number;
+  best_multiplier?: number;
+};
+
+type ChickenBridgeLeaderboardPayload = {
+  leaderboard: ChickenBridgeLeaderboardEntry[];
+  walletAddress: string;
+};
+
+type ChickenBridgePlayerStats = {
+  wallet_address: string;
+  total_games: number | string | null;
+  total_wins: number | string | null;
+  total_losses: number | string | null;
+  total_profit: number | string | null;
+  created_at: string | null;
+};
+
+type ChickenBridgeGameHistorySession = {
+  session_id: string;
+  onchain_session_id: string;
+  wallet_address: string;
+  stake_amount: number | string | null;
+  status: string | null;
+  max_row_reached: number | string | null;
+  final_multiplier: number | string | null;
+  payout_amount: number | string | null;
+  settlement_signature?: string | null;
+  settlement_deadline?: string | null;
+  settlement_tx_hash?: string | null;
+  ended_at?: string | null;
+  created_at?: string | null;
+};
+
+type ChickenBridgeGameHistoryPayload = {
+  sessions: ChickenBridgeGameHistorySession[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+type ChickenBridgePlayerTransaction = {
+  tx_hash: string;
+  wallet_address: string;
+  type: string | null;
+  onchain_session_id?: string | null;
+  amount: number | string | null;
+  created_at?: string | null;
+};
+
+type ChickenBridgePlayerTransactionsPayload = {
+  transactions: ChickenBridgePlayerTransaction[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 type ChickenBridgeApi = {
   backgroundMode: boolean;
   loadAvailableBalance: () => Promise<number>;
+  loadDepositBalances: () => Promise<ChickenBridgeDepositBalances>;
+  loadLeaderboard: () => Promise<ChickenBridgeLeaderboardPayload>;
+  loadPlayerStats: () => Promise<ChickenBridgePlayerStats>;
+  loadGameHistory: (limit?: number) => Promise<ChickenBridgeGameHistoryPayload>;
+  loadPlayerTransactions: (
+    limit?: number,
+  ) => Promise<ChickenBridgePlayerTransactionsPayload>;
+  getWalletAddress: () => string;
   openDeposit: (presetAmount?: number) => void;
+  claimFaucet: () => Promise<ChickenBridgeFaucetResult>;
+  depositToVault: (amount: number | string) => Promise<ChickenBridgeDepositResult>;
   startBet: (stake: number) => Promise<ChickenBridgeStartResult>;
   sendMove: (direction: string) => void;
   cashOut: () => Promise<ChickenBridgeSettlementResult>;
   crash: (reason?: string) => Promise<ChickenBridgeSettlementResult | null>;
+  autoSettlePending: () => Promise<boolean>;
 };
 
 interface Window {

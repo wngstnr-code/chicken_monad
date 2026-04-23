@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from "node:http";
 import { Server as SocketServer, type Socket } from "socket.io";
 import { v4 as uuidv4 } from "uuid";
+import { createPublicClient, http, type Hex } from "viem";
 import { getWalletFromSocketCookies } from "../middleware/auth.js";
 import { env } from "../config/env.js";
 import { supabase } from "../config/supabase.js";
@@ -43,6 +44,9 @@ import {
 } from "../services/signatureService.js";
 
 let io: SocketServer;
+const gatewayPublicClient = createPublicClient({
+  transport: http(env.MONAD_RPC_URL),
+});
 
 export function setupGameGateway(httpServer: HttpServer): SocketServer {
   io = new SocketServer(httpServer, {
@@ -56,6 +60,7 @@ export function setupGameGateway(httpServer: HttpServer): SocketServer {
     const cookieHeader = socket.handshake.headers.cookie;
     const walletAddress = getWalletFromSocketCookies(cookieHeader);
     if (!walletAddress) {
+      socket.emit("game:error", { message: "Not authenticated. Connect wallet first." });
       socket.emit("error", { message: "Not authenticated. Connect wallet first." });
       socket.disconnect(true);
       return;
@@ -71,8 +76,8 @@ export function setupGameGateway(httpServer: HttpServer): SocketServer {
     socket.on("game:start", async (data: { stake: number }) => {
       await handleGameStart(socket, walletAddress, data.stake);
     });
-    socket.on("game:abort_start", async (data: { sessionId?: string }) => {
-      await handleAbortStart(socket, walletAddress, data?.sessionId);
+    socket.on("game:abort_start", async (data: { sessionId?: string; txHash?: string }) => {
+      await handleAbortStart(socket, walletAddress, data?.sessionId, data?.txHash);
     });
     socket.on("game:move", (data: { direction: string }) => {
       handleGameMove(socket, walletAddress, data.direction);
@@ -107,16 +112,41 @@ async function handleGameStart(socket: Socket, walletAddress: string, stake: num
 
   const { data: stale } = await supabase
     .from("game_sessions")
-    .select("session_id")
+    .select("session_id, onchain_session_id, stake_amount")
     .eq("wallet_address", walletAddress)
     .eq("status", "ACTIVE")
     .maybeSingle();
 
   if (stale) {
-    await supabase
-      .from("game_sessions")
-      .update({ status: "CRASHED", ended_at: new Date().toISOString() })
-      .eq("session_id", stale.session_id);
+    console.log(`🧹 Cleaning up stale session: ${stale.session_id}`);
+    try {
+      const signed = await signSettlement({
+        playerAddress: walletAddress,
+        onchainSessionId: stale.onchain_session_id,
+        stakeAmount: stale.stake_amount,
+        payoutAmount: 0,
+        finalMultiplierBp: 0,
+        outcome: SETTLEMENT_OUTCOME.CRASHED,
+      });
+
+      await supabase
+        .from("game_sessions")
+        .update({
+          status: "CRASHED",
+          ended_at: new Date().toISOString(),
+          final_multiplier: 0,
+          payout_amount: 0,
+          settlement_signature: signed.signature,
+          settlement_deadline: signed.resolution.deadline,
+        })
+        .eq("session_id", stale.session_id);
+    } catch (err) {
+      console.error("❌ Failed to sign stale session cleanup:", err);
+      await supabase
+        .from("game_sessions")
+        .update({ status: "CRASHED", ended_at: new Date().toISOString() })
+        .eq("session_id", stale.session_id);
+    }
   }
 
   const sessionId = uuidv4();
@@ -164,7 +194,61 @@ async function handleGameStart(socket: Socket, walletAddress: string, stake: num
   });
 }
 
-async function handleAbortStart(socket: Socket, walletAddress: string, sessionId?: string): Promise<void> {
+async function canAbortStartSession(txHash?: string): Promise<{ canAbort: boolean; message?: string }> {
+  if (!txHash) {
+    // Pre-broadcast failure (e.g. user rejected signing). Safe to abort directly.
+    return { canAbort: true };
+  }
+
+  try {
+    const receipt = await gatewayPublicClient.getTransactionReceipt({
+      hash: txHash as Hex,
+    });
+
+    if (receipt.status === "reverted") {
+      return { canAbort: true };
+    }
+
+    return {
+      canAbort: false,
+      message:
+        "Transaksi startSession sudah masuk chain. Lanjutkan game/reconnect, jangan abort.",
+    };
+  } catch (error) {
+    const message = String(
+      (error as { shortMessage?: string; message?: string })?.shortMessage ||
+        (error as { message?: string })?.message ||
+        "",
+    ).toLowerCase();
+
+    const isUncertainState =
+      message.includes("not found") ||
+      message.includes("unknown transaction") ||
+      message.includes("could not find");
+
+    if (isUncertainState) {
+      return {
+        canAbort: false,
+        message:
+          "Status transaksi startSession belum final. Tunggu konfirmasi lalu reconnect.",
+      };
+    }
+
+    console.error("❌ Failed to verify startSession tx status before abort:", error);
+    return {
+      canAbort: false,
+      message:
+        "Gagal verifikasi status transaksi startSession. Coba lagi beberapa saat.",
+    };
+  }
+}
+
+async function handleAbortStart(
+  socket: Socket,
+  walletAddress: string,
+  sessionId?: string,
+  txHash?: string,
+): Promise<void> {
   const state = getGameByWallet(walletAddress);
   if (!state) {
     socket.emit("game:error", { message: "No active game session to abort." });
@@ -173,6 +257,16 @@ async function handleAbortStart(socket: Socket, walletAddress: string, sessionId
 
   if (sessionId && sessionId !== state.sessionId) {
     socket.emit("game:error", { message: "Session mismatch while aborting start." });
+    return;
+  }
+
+  const abortCheck = await canAbortStartSession(txHash);
+  if (!abortCheck.canAbort) {
+    socket.emit("game:error", {
+      message:
+        abortCheck.message ||
+        "Start session belum bisa di-abort karena status tx masih belum pasti.",
+    });
     return;
   }
 
@@ -198,6 +292,10 @@ async function handleAbortStart(socket: Socket, walletAddress: string, sessionId
   }
 
   console.log(`↩️ Start aborted: ${walletAddress} | Session: ${state.sessionId}`);
+  socket.emit("game:start_aborted", {
+    sessionId: state.sessionId,
+    message: "Start bet dibatalkan karena transaksi startSession gagal/revert.",
+  });
 }
 
 function handleGameMove(socket: Socket, walletAddress: string, direction: string): void {
@@ -339,6 +437,7 @@ async function handleGameCrash(
       finalRow: state.maxRow,
       multiplier: (effectiveMultBp / 10000).toFixed(4),
       stakeLost: state.stake,
+      sessionId: state.sessionId,
       onchainSessionId: state.onchainSessionId,
       settlementSignature: settlementResult?.signature ?? null,
       resolution: settlementResult?.resolution ?? null,
@@ -479,14 +578,16 @@ function handleReconnect(socket: Socket, walletAddress: string, state: ActiveGam
     cp: state.currentCp,
     cashoutWindow: state.cashoutWindow,
     segmentRemainingMs: timerGetSegmentRemainingMs(state.timer),
+    cpStayRemainingMs: getCpStayRemainingMs(state.timer),
+    decayBp: getCurrentDecayBp(state.timer),
     serverTime: Date.now(),
   });
 
   socket.on("game:move", (data: { direction: string }) => {
     handleGameMove(socket, walletAddress, data.direction);
   });
-  socket.on("game:abort_start", async (data: { sessionId?: string }) => {
-    await handleAbortStart(socket, walletAddress, data?.sessionId);
+  socket.on("game:abort_start", async (data: { sessionId?: string; txHash?: string }) => {
+    await handleAbortStart(socket, walletAddress, data?.sessionId, data?.txHash);
   });
   socket.on("game:crash", () => {
     void handleGameCrash(socket, walletAddress, "client_reported");

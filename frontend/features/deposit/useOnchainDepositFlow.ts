@@ -23,12 +23,65 @@ import { explorerTxUrl } from "../../lib/web3/monad";
 import type { DepositFlowViewModel } from "./types";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
+const MAX_UINT256 = 115792089237316195423570985008687907853269984665640564039457584007913129639935n;
 
 function normalizeError(error: unknown, fallback: string) {
   if (error && typeof error === "object" && "message" in error) {
     return String((error as { message?: string }).message || fallback);
   }
   return fallback;
+}
+
+function isUserRejectedRequestError(error: unknown) {
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String((error as { name?: string }).name || "").toLowerCase()
+      : "";
+  const message = normalizeError(error, "").toLowerCase();
+  const combined = `${name} ${message}`;
+
+  return (
+    combined.includes("userrejectedrequesterror") ||
+    combined.includes("user rejected") ||
+    combined.includes("rejected the request") ||
+    combined.includes("user denied")
+  );
+}
+
+function compactWalletErrorMessage(message: string) {
+  if (!message) return "";
+
+  const markers = [
+    "Request Arguments:",
+    "Contract Call:",
+    "Docs:",
+    "Details:",
+    "Version:",
+  ];
+
+  let compact = message;
+  for (const marker of markers) {
+    const markerIndex = compact.indexOf(marker);
+    if (markerIndex !== -1) {
+      compact = compact.slice(0, markerIndex);
+    }
+  }
+
+  return compact.trim();
+}
+
+function toUserFacingError(
+  error: unknown,
+  fallback: string,
+  rejectedMessage = "Transaksi dibatalkan di wallet.",
+) {
+  if (isUserRejectedRequestError(error)) {
+    return rejectedMessage;
+  }
+
+  const rawMessage = normalizeError(error, fallback);
+  const compactMessage = compactWalletErrorMessage(rawMessage);
+  return compactMessage || fallback;
 }
 
 function formatUsdcAmount(value: bigint | undefined) {
@@ -278,14 +331,14 @@ export function useOnchainDepositFlow(): DepositFlowViewModel {
   const errorMessage = useMemo(() => {
     if (uiError) return uiError;
     return (
-      normalizeError(approveWriteError, "") ||
-      normalizeError(approveConfirmError, "") ||
-      normalizeError(depositWriteError, "") ||
-      normalizeError(depositConfirmError, "") ||
-      normalizeError(withdrawWriteError, "") ||
-      normalizeError(withdrawConfirmError, "") ||
-      normalizeError(faucetWriteError, "") ||
-      normalizeError(faucetConfirmError, "")
+      toUserFacingError(approveWriteError, "") ||
+      toUserFacingError(approveConfirmError, "") ||
+      toUserFacingError(depositWriteError, "") ||
+      toUserFacingError(depositConfirmError, "") ||
+      toUserFacingError(withdrawWriteError, "") ||
+      toUserFacingError(withdrawConfirmError, "") ||
+      toUserFacingError(faucetWriteError, "") ||
+      toUserFacingError(faucetConfirmError, "")
     );
   }, [
     faucetConfirmError,
@@ -315,7 +368,13 @@ export function useOnchainDepositFlow(): DepositFlowViewModel {
         functionName: "claim",
       });
     } catch (faucetError) {
-      setUiError(normalizeError(faucetError, "Faucet claim gagal."));
+      setUiError(
+        toUserFacingError(
+          faucetError,
+          "Faucet claim gagal.",
+          "Klaim faucet dibatalkan di wallet.",
+        ),
+      );
     }
   }
 
@@ -337,10 +396,16 @@ export function useOnchainDepositFlow(): DepositFlowViewModel {
         address: usdcAddress,
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [vaultAddress, parsedAmount],
+        args: [vaultAddress, MAX_UINT256],
       });
     } catch (approveError) {
-      setUiError(normalizeError(approveError, "Approve gagal."));
+      setUiError(
+        toUserFacingError(
+          approveError,
+          "Approve gagal.",
+          "Approve dibatalkan di wallet.",
+        ),
+      );
     }
   }
 
@@ -354,8 +419,27 @@ export function useOnchainDepositFlow(): DepositFlowViewModel {
       return;
     }
     if (needsApproval) {
-      setUiError("Allowance belum cukup. Jalankan approve dulu.");
-      return;
+      setStatusMessage("Approving USDC (Infinite)...");
+      try {
+        await approveAsync({
+          address: usdcAddress!,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [vaultAddress, MAX_UINT256],
+        });
+        setStatusMessage("Approval submitted. Silakan tunggu konfirmasi...");
+        return; // Wait for approval confirmation effect to update state
+      } catch (approveError) {
+        setStatusMessage("");
+        setUiError(
+          toUserFacingError(
+            approveError,
+            "Approve gagal.",
+            "Approve dibatalkan di wallet.",
+          ),
+        );
+        return;
+      }
     }
 
     setUiError("");
@@ -369,7 +453,13 @@ export function useOnchainDepositFlow(): DepositFlowViewModel {
         args: [parsedAmount],
       });
     } catch (depositError) {
-      setUiError(normalizeError(depositError, "Deposit gagal."));
+      setUiError(
+        toUserFacingError(
+          depositError,
+          "Deposit gagal.",
+          "Deposit dibatalkan di wallet.",
+        ),
+      );
     }
   }
 
@@ -398,7 +488,13 @@ export function useOnchainDepositFlow(): DepositFlowViewModel {
         args: [parsedAmount],
       });
     } catch (withdrawError) {
-      setUiError(normalizeError(withdrawError, "Withdraw gagal."));
+      setUiError(
+        toUserFacingError(
+          withdrawError,
+          "Withdraw gagal.",
+          "Withdraw dibatalkan di wallet.",
+        ),
+      );
     }
   }
 
@@ -416,7 +512,7 @@ export function useOnchainDepositFlow(): DepositFlowViewModel {
   const disableApproveButton =
     !canTransact || !parsedAmount || !needsApproval || isFaucetBusy || isApproveBusy || isDepositBusy || isWithdrawBusy;
   const disableDepositButton =
-    !canTransact || !parsedAmount || needsApproval || isFaucetBusy || isApproveBusy || isDepositBusy || isWithdrawBusy;
+    !canTransact || !parsedAmount || isFaucetBusy || isApproveBusy || isDepositBusy || isWithdrawBusy;
   const disableWithdrawButton =
     !canTransact ||
     !parsedAmount ||
