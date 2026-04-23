@@ -21,13 +21,27 @@ function splitList(rawValue: string) {
     .filter(Boolean);
 }
 
-function parseChainIdDecimal(chainIdHex: string) {
-  if (!chainIdHex) return 0;
-  const parsed = Number.parseInt(chainIdHex, 16);
-  return Number.isFinite(parsed) ? parsed : 0;
+function parseChainId(rawValue: string) {
+  const normalized = String(rawValue || "").trim().toLowerCase();
+  if (!normalized) {
+    return { chainIdHex: "", chainIdDecimal: 0 };
+  }
+
+  const parsed = normalized.startsWith("0x")
+    ? Number.parseInt(normalized, 16)
+    : Number.parseInt(normalized, 10);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { chainIdHex: "", chainIdDecimal: 0 };
+  }
+
+  return {
+    chainIdHex: `0x${parsed.toString(16)}`,
+    chainIdDecimal: parsed,
+  };
 }
 
-const chainIdHex = process.env.NEXT_PUBLIC_MONAD_CHAIN_ID || "";
+const parsedChainId = parseChainId(process.env.NEXT_PUBLIC_MONAD_CHAIN_ID || "");
 const chainName = process.env.NEXT_PUBLIC_MONAD_CHAIN_NAME || "Monad";
 const nativeCurrencyName = process.env.NEXT_PUBLIC_MONAD_NATIVE_NAME || "MON";
 const nativeCurrencySymbol = process.env.NEXT_PUBLIC_MONAD_NATIVE_SYMBOL || "MON";
@@ -36,8 +50,8 @@ const rpcUrls = splitList(process.env.NEXT_PUBLIC_MONAD_RPC_URLS || "");
 const blockExplorerUrls = splitList(process.env.NEXT_PUBLIC_MONAD_EXPLORER_URLS || "");
 
 export const MONAD_CHAIN: MonadChainConfig = {
-  chainIdHex,
-  chainIdDecimal: parseChainIdDecimal(chainIdHex),
+  chainIdHex: parsedChainId.chainIdHex,
+  chainIdDecimal: parsedChainId.chainIdDecimal,
   chainName,
   nativeCurrency: {
     name: nativeCurrencyName,
