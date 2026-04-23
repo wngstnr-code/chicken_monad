@@ -2982,8 +2982,20 @@ function initBettingUI() {
             );
             return;
           }
-        } catch {
-          // Lanjutkan ke startBet; error detail akan ditangkap di bawah.
+        } catch (error) {
+          const message = formatBridgeError(
+            error,
+            "Gagal cek saldo vault.",
+            "Permintaan dibatalkan di wallet."
+          );
+          console.error("Failed to load available vault balance:", error);
+          dispatchPlayStatus({
+            message,
+            tone: "error",
+            durationMs: 4200,
+          });
+          showErrorToast(message);
+          return;
         }
       }
     }
@@ -3004,12 +3016,6 @@ function initBettingUI() {
       const started = await startBet(stake);
       if (!started) {
         keepStatusMessage = true;
-        showErrorToast("Start bet gagal. Cek saldo vault / koneksi wallet.");
-        dispatchPlayStatus({
-          message: "START BET FAILED. CHECK VAULT BALANCE.",
-          tone: "error",
-          durationMs: 4200,
-        });
       }
     } finally {
       startBetBusy = false;

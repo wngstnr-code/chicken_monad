@@ -1,10 +1,18 @@
 import { Router, type Request, type Response } from "express";
+import { createPublicClient, http, isHex, parseAbi, type Address, type Hex } from "viem";
 import { requireAuth } from "../middleware/auth.js";
+import { env } from "../config/env.js";
 import { supabase } from "../config/supabase.js";
 import { hasActiveGame } from "../services/gameState.js";
 import { usdcToUint256 } from "../services/signatureService.js";
 
 const router = Router();
+const settlementPublicClient = createPublicClient({
+  transport: http(env.MONAD_RPC_URL),
+});
+const GAME_SETTLEMENT_READ_ABI = parseAbi([
+  "function getSession(bytes32 sessionId) view returns (address player, uint256 stakeAmount, uint64 startedAt, bool active, bool settled)",
+]);
 
 function buildResolutionFromSession(walletAddress: string, session: Record<string, unknown>) {
   const stakeAmount = Number(session.stake_amount ?? 0);
@@ -22,6 +30,49 @@ function buildResolutionFromSession(walletAddress: string, session: Record<strin
     outcome: status === "CRASHED" ? 2 : 1,
     deadline: String(session.settlement_deadline ?? "0"),
   };
+}
+
+async function clearUnsettlablePendingSession(sessionId: string) {
+  const { error } = await supabase
+    .from("game_sessions")
+    .update({
+      settlement_signature: null,
+      settlement_deadline: null,
+    })
+    .eq("session_id", sessionId);
+
+  if (error) {
+    console.error(`❌ Failed to clear stale pending settlement ${sessionId}:`, error);
+  }
+}
+
+async function isCurrentOnchainPendingSettlement(session: Record<string, unknown>) {
+  const onchainSessionId = String(session.onchain_session_id ?? "");
+  if (!isHex(onchainSessionId, { strict: true })) {
+    return false;
+  }
+
+  try {
+    const onchainSession = await settlementPublicClient.readContract({
+      address: env.GAME_SETTLEMENT_ADDRESS as Address,
+      abi: GAME_SETTLEMENT_READ_ABI,
+      functionName: "getSession",
+      args: [onchainSessionId as Hex],
+    });
+
+    const player = onchainSession[0];
+    const active = onchainSession[3];
+    const settled = onchainSession[4];
+
+    if (!player || /^0x0{40}$/i.test(player)) {
+      return false;
+    }
+
+    return Boolean(active && !settled);
+  } catch (inspectError) {
+    console.error(`❌ Failed to inspect pending settlement ${onchainSessionId}:`, inspectError);
+    return true;
+  }
 }
 
 router.get("/active", requireAuth, async (req: Request, res: Response) => {
@@ -66,11 +117,26 @@ async function getPendingSettlements(req: Request, res: Response) {
     return;
   }
 
-  const pendingSettlements = (data || []).map((session: Record<string, unknown>) => ({
-    ...session,
-    resolution: buildResolutionFromSession(walletAddress, session),
-    signature: session.settlement_signature,
-  }));
+  const pendingSettlements: Array<Record<string, unknown>> = [];
+
+  for (const session of data || []) {
+    const isStillPendingOnchain = await isCurrentOnchainPendingSettlement(session);
+    if (!isStillPendingOnchain) {
+      console.warn(
+        `🧹 Ignoring stale pending settlement ${String(session.session_id)} (${String(
+          session.onchain_session_id ?? "",
+        )})`,
+      );
+      await clearUnsettlablePendingSession(String(session.session_id));
+      continue;
+    }
+
+    pendingSettlements.push({
+      ...session,
+      resolution: buildResolutionFromSession(walletAddress, session),
+      signature: session.settlement_signature,
+    });
+  }
 
   res.json({
     pendingSettlements,
