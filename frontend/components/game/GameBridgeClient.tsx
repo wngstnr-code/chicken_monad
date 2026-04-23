@@ -536,6 +536,17 @@ export function GameBridgeClient({
       return toNumberAmount(value);
     }
 
+    async function readActiveSessionId(address: Address) {
+      const value = await readContract(wagmiConfig, {
+        address: GAME_SETTLEMENT_ADDRESS as Address,
+        abi: GAME_SETTLEMENT_ABI,
+        functionName: "activeSessionOf",
+        args: [address],
+      });
+
+      return String(value || "");
+    }
+
     async function readWalletUsdcBalance(address: Address) {
       const value = await readContract(wagmiConfig, {
         address: USDC_ADDRESS as Address,
@@ -564,6 +575,108 @@ export function GameBridgeClient({
       const txHash = await writeContract(wagmiConfig, request);
       await waitForTransactionReceipt(wagmiConfig, { hash: txHash as Hash });
       return txHash as string;
+    }
+
+    async function fetchPendingSettlements() {
+      try {
+        return await backendFetch<{
+          hasPending: boolean;
+          pendingSettlements: any[];
+        }>("/api/game/pending-settlement");
+      } catch (err) {
+        console.error("❌ Gagal fetch pending settlement:", err);
+        return {
+          hasPending: false,
+          pendingSettlements: [],
+        };
+      }
+    }
+
+    async function settlePendingSettlements(
+      pendingSettlements: any[],
+      options?: { targetOnchainSessionId?: string },
+    ) {
+      const targetOnchainSessionId =
+        options?.targetOnchainSessionId?.toLowerCase() || "";
+      const candidates = targetOnchainSessionId
+        ? pendingSettlements.filter((session) => {
+            const onchainSessionId = String(
+              session.onchain_session_id ||
+                session.resolution?.sessionId ||
+                session.payload?.sessionId ||
+                "",
+            ).toLowerCase();
+            return onchainSessionId === targetOnchainSessionId;
+          })
+        : pendingSettlements;
+
+      if (candidates.length === 0) {
+        return false;
+      }
+
+      let settledCount = 0;
+      let failedCount = 0;
+
+      for (const s of candidates) {
+        try {
+          const resolution = s.resolution || s.payload;
+          const signature = s.settlement_signature || s.signature;
+
+          if (!resolution || !signature) {
+            failedCount += 1;
+            continue;
+          }
+
+          emitDepositProgress(
+            "settle_sign",
+            `Settling old session ${String(s.onchain_session_id || "").slice(0, 10)}...`,
+          );
+
+          const txHash = await writeAndConfirm({
+            address: GAME_SETTLEMENT_ADDRESS as Address,
+            abi: GAME_SETTLEMENT_ABI,
+            functionName: "settleWithSignature",
+            args: [resolution, signature as `0x${string}`],
+          });
+
+          await backendPost("/api/game/clear-settlement", {
+            sessionId: s.session_id,
+            txHash,
+          });
+
+          console.log(`✅ Old session ${s.session_id} settled: ${txHash}`);
+          settledCount += 1;
+        } catch (err) {
+          if (isUserRejectedRequestError(err)) {
+            emitDepositProgress(
+              "settle_cancelled",
+              "Settlement dibatalkan di wallet. Start bet dihentikan.",
+            );
+            throw new Error(
+              "Kamu cancel sign settlement session lama. Selesaikan dulu settlement itu lalu klik Start Bet lagi.",
+            );
+          }
+
+          console.error(`❌ Gagal settle old session ${s.session_id}:`, err);
+          failedCount += 1;
+        }
+      }
+
+      if (failedCount > 0) {
+        emitDepositProgress(
+          "settle_incomplete",
+          `${failedCount} pending settlement belum berhasil disettle.`,
+        );
+        throw new Error(
+          `${failedCount} pending settlement belum berhasil disettle. Coba lagi sebelum start bet.`,
+        );
+      }
+
+      if (settledCount > 0) {
+        emitDepositProgress("done", "Old session settled.");
+      }
+
+      return settledCount > 0;
     }
 
     window.__CHICKEN_MONAD_BRIDGE__ = {
@@ -813,16 +926,7 @@ export function GameBridgeClient({
         await requireReadyGameWallet();
 
         // 1. Cek apakah ada settlement yang tertunda di backend (sudah sign tapi belum submit ke chain)
-        let pending: { hasPending: boolean; pendingSettlements: any[] };
-        try {
-          pending = await backendFetch<{
-            hasPending: boolean;
-            pendingSettlements: any[];
-          }>("/api/game/pending-settlement");
-        } catch (err) {
-          console.error("❌ Gagal fetch pending settlement:", err);
-          return false;
-        }
+        const pending = await fetchPendingSettlements();
 
         if (!pending.hasPending || pending.pendingSettlements.length === 0) {
           return false;
@@ -832,65 +936,7 @@ export function GameBridgeClient({
           `🧹 Auto-settling ${pending.pendingSettlements.length} pending session(s)...`,
         );
 
-        let settledCount = 0;
-        let failedCount = 0;
-
-        for (const s of pending.pendingSettlements) {
-          try {
-            const resolution = s.resolution || s.payload;
-            const signature = s.settlement_signature || s.signature;
-
-            if (!resolution || !signature) {
-              failedCount += 1;
-              continue;
-            }
-
-            emitDepositProgress(
-              "settle_sign",
-              `Settling old session ${s.onchain_session_id.slice(0, 8)}...`,
-            );
-
-            const txHash = await writeAndConfirm({
-              address: GAME_SETTLEMENT_ADDRESS as Address,
-              abi: GAME_SETTLEMENT_ABI,
-              functionName: "settleWithSignature",
-              args: [resolution, signature as `0x${string}`],
-            });
-
-            await backendPost("/api/game/clear-settlement", {
-              sessionId: s.session_id,
-              txHash,
-            });
-            console.log(`✅ Old session ${s.session_id} settled: ${txHash}`);
-            settledCount += 1;
-          } catch (err) {
-            if (isUserRejectedRequestError(err)) {
-              emitDepositProgress(
-                "settle_cancelled",
-                "Settlement dibatalkan di wallet. Start bet dihentikan.",
-              );
-              throw new Error(
-                "Kamu cancel sign settlement session lama. Selesaikan dulu settlement itu lalu klik Start Bet lagi.",
-              );
-            }
-
-            console.error(`❌ Gagal settle old session ${s.session_id}:`, err);
-            failedCount += 1;
-          }
-        }
-
-        if (failedCount > 0) {
-          emitDepositProgress(
-            "settle_incomplete",
-            `${failedCount} pending settlement belum berhasil disettle.`,
-          );
-          throw new Error(
-            `${failedCount} pending settlement belum berhasil disettle. Coba lagi sebelum start bet.`,
-          );
-        }
-
-        emitDepositProgress("done", "All pending sessions cleared.");
-        return settledCount > 0;
+        return settlePendingSettlements(pending.pendingSettlements);
       },
       startBet: async (stake: number) => {
         const playerAddress = await requireReadyGameWallet();
@@ -940,9 +986,23 @@ export function GameBridgeClient({
           typeof activeSessionId === "string" &&
           activeSessionId.toLowerCase() !== ZERO_BYTES32
         ) {
-          throw new Error(
-            "Masih ada session aktif on-chain. Selesaikan settlement run sebelumnya lalu coba Start Bet lagi.",
-          );
+          const pending = await fetchPendingSettlements();
+
+          if (pending.hasPending && pending.pendingSettlements.length > 0) {
+            await settlePendingSettlements(pending.pendingSettlements, {
+              targetOnchainSessionId: activeSessionId,
+            });
+          }
+
+          const refreshedActiveSessionId = await readActiveSessionId(playerAddress);
+          if (
+            typeof refreshedActiveSessionId === "string" &&
+            refreshedActiveSessionId.toLowerCase() !== ZERO_BYTES32
+          ) {
+            throw new Error(
+              `Masih ada session onchain lama yang aktif (${refreshedActiveSessionId.slice(0, 10)}...). Selesaikan settlement session itu dulu sebelum start bet baru.`,
+            );
+          }
         }
 
         const socket = ensureSocket();

@@ -4,7 +4,11 @@ import { requireAuth } from "../middleware/auth.js";
 import { env } from "../config/env.js";
 import { supabase } from "../config/supabase.js";
 import { hasActiveGame } from "../services/gameState.js";
-import { usdcToUint256 } from "../services/signatureService.js";
+import {
+  SETTLEMENT_OUTCOME,
+  signSettlement,
+  usdcToUint256,
+} from "../services/signatureService.js";
 
 const router = Router();
 const settlementPublicClient = createPublicClient({
@@ -43,6 +47,72 @@ async function clearUnsettlablePendingSession(sessionId: string) {
 
   if (error) {
     console.error(`❌ Failed to clear stale pending settlement ${sessionId}:`, error);
+  }
+}
+
+async function ensureSettlementSignature(
+  walletAddress: string,
+  session: Record<string, unknown>,
+) {
+  const existingSignature = String(session.settlement_signature ?? "").trim();
+  const existingDeadline = Number(session.settlement_deadline ?? 0);
+
+  if (existingSignature && existingDeadline > 0) {
+    return {
+      signature: existingSignature,
+      deadline: existingDeadline,
+    };
+  }
+
+  const status = String(session.status ?? "");
+  if (status !== "CRASHED" && status !== "CASHED_OUT") {
+    return null;
+  }
+
+  try {
+    const settlement = await signSettlement({
+      playerAddress: walletAddress,
+      onchainSessionId: String(session.onchain_session_id ?? ""),
+      stakeAmount: Number(session.stake_amount ?? 0),
+      payoutAmount: Number(session.payout_amount ?? 0),
+      finalMultiplierBp:
+        status === "CRASHED"
+          ? 0
+          : Math.round(Number(session.final_multiplier ?? 0) * 10_000),
+      outcome:
+        status === "CRASHED"
+          ? SETTLEMENT_OUTCOME.CRASHED
+          : SETTLEMENT_OUTCOME.CASHED_OUT,
+    });
+
+    const nextSignature = settlement.signature;
+    const nextDeadline = Number(settlement.resolution.deadline);
+
+    const { error } = await supabase
+      .from("game_sessions")
+      .update({
+        settlement_signature: nextSignature,
+        settlement_deadline: nextDeadline,
+      })
+      .eq("session_id", String(session.session_id));
+
+    if (error) {
+      console.error(
+        `❌ Failed to persist generated settlement signature ${String(session.session_id)}:`,
+        error,
+      );
+    }
+
+    return {
+      signature: nextSignature,
+      deadline: nextDeadline,
+    };
+  } catch (signError) {
+    console.error(
+      `❌ Failed to generate settlement signature for ${String(session.session_id)}:`,
+      signError,
+    );
+    return null;
   }
 }
 
@@ -106,7 +176,6 @@ async function getPendingSettlements(req: Request, res: Response) {
     )
     .eq("wallet_address", walletAddress)
     .in("status", ["CASHED_OUT", "CRASHED"])
-    .not("settlement_signature", "is", null)
     .is("settlement_tx_hash", null)
     .order("ended_at", { ascending: false })
     .limit(5);
@@ -136,10 +205,24 @@ async function getPendingSettlements(req: Request, res: Response) {
       continue;
     }
 
-    pendingSettlements.push({
+    const ensuredSettlement = await ensureSettlementSignature(walletAddress, session);
+    if (!ensuredSettlement?.signature || !ensuredSettlement.deadline) {
+      console.warn(
+        `⚠️ Pending session ${String(session.session_id)} has no usable settlement signature yet.`,
+      );
+      continue;
+    }
+
+    const normalizedSession = {
       ...session,
-      resolution: buildResolutionFromSession(walletAddress, session),
-      signature: session.settlement_signature,
+      settlement_signature: ensuredSettlement.signature,
+      settlement_deadline: ensuredSettlement.deadline,
+    };
+
+    pendingSettlements.push({
+      ...normalizedSession,
+      resolution: buildResolutionFromSession(walletAddress, normalizedSession),
+      signature: ensuredSettlement.signature,
     });
   }
 
