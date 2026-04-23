@@ -81,6 +81,7 @@ type PendingResolver<T> = {
 const RESPONSE_TIMEOUT_MS = 45_000;
 const RECONNECT_GRACE_TIMEOUT_MS = 32_000;
 const APPROVE_MAX_USDC_UNITS = parseUnits("10000000", USDC_DECIMALS);
+const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
 
 function normalizeError(error: unknown, fallback: string) {
   return readRawErrorMessage(error, fallback);
@@ -114,6 +115,30 @@ function shouldAbortStartSessionOnReceiptError(error: unknown) {
   ];
 
   return !uncertainPatterns.some((pattern) => combined.includes(pattern));
+}
+
+function toStartSessionFailureMessage(error: unknown, fallback: string) {
+  const normalized = normalizeError(error, fallback).toLowerCase();
+
+  if (normalized.includes("insufficientavailablebalance")) {
+    return "Saldo available di vault tidak cukup untuk nominal bet ini. Deposit dulu atau kecilkan stake.";
+  }
+  if (normalized.includes("sessionalreadyactive")) {
+    return "Masih ada session aktif on-chain. Selesaikan settlement run sebelumnya dulu lalu coba lagi.";
+  }
+  if (normalized.includes("invalidstakeamount")) {
+    return "Nominal stake tidak valid untuk kontrak settlement.";
+  }
+  if (normalized.includes("invalidsessionid")) {
+    return "Session ID on-chain tidak valid. Coba start bet ulang.";
+  }
+  if (normalized.includes("enforcedpause") || normalized.includes("paused")) {
+    return "Contract settlement sedang pause. Coba lagi beberapa saat.";
+  }
+
+  return toUserFacingWalletError(error, fallback, {
+    userRejectedMessage: "Start bet dibatalkan di wallet.",
+  });
 }
 
 function toNumberAmount(value: bigint) {
@@ -868,7 +893,7 @@ export function GameBridgeClient({
         return settledCount > 0;
       },
       startBet: async (stake: number) => {
-        await requireReadyGameWallet();
+        const playerAddress = await requireReadyGameWallet();
 
         // --- AUTO SETTLE CHECK ---
         try {
@@ -886,6 +911,37 @@ export function GameBridgeClient({
                   "Settlement session lama dibatalkan di wallet. Selesaikan dulu sebelum start bet lagi.",
               },
             ),
+          );
+        }
+
+        const stakeAmountUnits = parseUnits(String(stake), USDC_DECIMALS);
+        const [availableBalanceUnits, activeSessionId] = await Promise.all([
+          readContract(wagmiConfig, {
+            address: GAME_VAULT_ADDRESS as Address,
+            abi: GAME_VAULT_ABI,
+            functionName: "availableBalanceOf",
+            args: [playerAddress],
+          }) as Promise<bigint>,
+          readContract(wagmiConfig, {
+            address: GAME_SETTLEMENT_ADDRESS as Address,
+            abi: GAME_SETTLEMENT_ABI,
+            functionName: "activeSessionOf",
+            args: [playerAddress],
+          }) as Promise<`0x${string}`>,
+        ]);
+
+        if (availableBalanceUnits < stakeAmountUnits) {
+          throw new Error(
+            `Saldo available vault kurang. Tersedia ${toNumberAmount(availableBalanceUnits).toFixed(2)} USDC, butuh ${stake.toFixed(2)} USDC.`,
+          );
+        }
+
+        if (
+          typeof activeSessionId === "string" &&
+          activeSessionId.toLowerCase() !== ZERO_BYTES32
+        ) {
+          throw new Error(
+            "Masih ada session aktif on-chain. Selesaikan settlement run sebelumnya lalu coba Start Bet lagi.",
           );
         }
 
@@ -917,9 +973,11 @@ export function GameBridgeClient({
 
           activeSessionIdRef.current = payload.sessionId;
 
-          void waitForTransactionReceipt(wagmiConfig, {
-            hash: txHash as Hash,
-          }).catch((error) => {
+          try {
+            await waitForTransactionReceipt(wagmiConfig, {
+              hash: txHash as Hash,
+            });
+          } catch (error) {
             const shouldAbort = shouldAbortStartSessionOnReceiptError(error);
 
             if (shouldAbort) {
@@ -927,7 +985,12 @@ export function GameBridgeClient({
                 sessionId: payload.sessionId,
                 txHash,
               });
-              return;
+              throw new Error(
+                toStartSessionFailureMessage(
+                  error,
+                  "Transaksi startSession gagal/revert.",
+                ),
+              );
             }
 
             window.dispatchEvent(
@@ -938,7 +1001,7 @@ export function GameBridgeClient({
                 },
               }),
             );
-          });
+          }
 
           return {
             sessionId: payload.sessionId,
@@ -951,9 +1014,10 @@ export function GameBridgeClient({
           console.error("❌ Smart Contract Revert (startSession):", error);
           socket.emit("game:abort_start", { sessionId: payload.sessionId });
           throw new Error(
-            toUserFacingWalletError(error, "Transaksi startSession gagal/revert.", {
-              userRejectedMessage: "Start bet dibatalkan di wallet.",
-            }),
+            toStartSessionFailureMessage(
+              error,
+              "Transaksi startSession gagal/revert.",
+            ),
           );
         }
       },

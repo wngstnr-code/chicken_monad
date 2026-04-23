@@ -73,6 +73,13 @@ export const GAME_VAULT_ABI = [
 export const GAME_SETTLEMENT_ABI = [
   {
     type: "function",
+    name: "activeSessionOf",
+    stateMutability: "view",
+    inputs: [{ name: "player", type: "address" }],
+    outputs: [{ name: "", type: "bytes32" }],
+  },
+  {
+    type: "function",
     name: "startSession",
     stateMutability: "nonpayable",
     inputs: [
