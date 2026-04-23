@@ -1636,7 +1636,8 @@ canvas.game {
 }
 
 #bet-hud {
-  top: 102px;
+  top: var(--play-nav-hud-offset, 180px);
+  bottom: auto;
   right: 18px;
   width: 236px;
   z-index: 22;
@@ -2145,7 +2146,8 @@ canvas.game {
 
   #bet-hud {
     right: 10px;
-    top: 104px;
+    top: var(--play-nav-hud-offset, 200px);
+    bottom: auto;
     width: 188px;
   }
 

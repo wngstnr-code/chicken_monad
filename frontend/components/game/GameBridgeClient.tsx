@@ -13,6 +13,11 @@ import { useWallet } from "../web3/WalletProvider";
 import { backendPost, backendFetch } from "../../lib/backend/api";
 import { BACKEND_API_URL, hasBackendApiConfig } from "../../lib/backend/config";
 import {
+  isUserRejectedWalletError,
+  readRawErrorMessage,
+  toUserFacingWalletError,
+} from "../../lib/errors";
+import {
   ERC20_ABI,
   GAME_SETTLEMENT_ABI,
   GAME_SETTLEMENT_ADDRESS,
@@ -78,26 +83,11 @@ const RECONNECT_GRACE_TIMEOUT_MS = 32_000;
 const APPROVE_MAX_USDC_UNITS = parseUnits("10000000", USDC_DECIMALS);
 
 function normalizeError(error: unknown, fallback: string) {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message?: string }).message || fallback);
-  }
-  return fallback;
+  return readRawErrorMessage(error, fallback);
 }
 
 function isUserRejectedRequestError(error: unknown) {
-  const name =
-    error && typeof error === "object" && "name" in error
-      ? String((error as { name?: string }).name || "").toLowerCase()
-      : "";
-  const message = normalizeError(error, "").toLowerCase();
-  const combined = `${name} ${message}`;
-
-  return (
-    combined.includes("userrejectedrequesterror") ||
-    combined.includes("user rejected") ||
-    combined.includes("rejected the request") ||
-    combined.includes("user denied")
-  );
+  return isUserRejectedWalletError(error);
 }
 
 function shouldAbortStartSessionOnReceiptError(error: unknown) {
@@ -298,7 +288,10 @@ export function GameBridgeClient({
       });
 
       socket.on("game:error", (payload: { message?: string }) => {
-        const message = payload?.message || "Backend game error.";
+        const message = toUserFacingWalletError(
+          payload?.message || "",
+          "Backend game error.",
+        );
         rejectPendingRequest(pendingStartRef.current, message);
         rejectPendingRequest(pendingCashoutRef.current, message);
         rejectPendingRequest(pendingCrashRef.current, message);
@@ -311,10 +304,10 @@ export function GameBridgeClient({
       });
 
       socket.on("error", (payload: { message?: string } | string) => {
-        const message =
-          typeof payload === "string"
-            ? payload
-            : payload?.message || "Socket error dari backend.";
+        const message = toUserFacingWalletError(
+          typeof payload === "string" ? payload : payload?.message || "",
+          "Socket error dari backend.",
+        );
 
         rejectPendingRequest(pendingStartRef.current, message);
         rejectPendingRequest(pendingCashoutRef.current, message);
@@ -657,11 +650,20 @@ export function GameBridgeClient({
           throw new Error("Config faucet contract belum valid.");
         }
 
-        const txHash = await writeAndConfirm({
-          address: USDC_FAUCET_ADDRESS as Address,
-          abi: USDC_FAUCET_ABI,
-          functionName: "claim",
-        });
+        let txHash: string;
+        try {
+          txHash = await writeAndConfirm({
+            address: USDC_FAUCET_ADDRESS as Address,
+            abi: USDC_FAUCET_ABI,
+            functionName: "claim",
+          });
+        } catch (error) {
+          throw new Error(
+            toUserFacingWalletError(error, "Claim faucet gagal.", {
+              userRejectedMessage: "Claim faucet dibatalkan di wallet.",
+            }),
+          );
+        }
 
         return {
           txHash,
@@ -710,35 +712,70 @@ export function GameBridgeClient({
             "approve_sign",
             "Sign 1/2: approve max USDC for vault.",
           );
-          approveTxHash = (await writeContract(wagmiConfig, {
-            address: USDC_ADDRESS as Address,
-            abi: ERC20_ABI,
-            functionName: "approve",
-            args: [GAME_VAULT_ADDRESS as Address, APPROVE_MAX_USDC_UNITS],
-          })) as string;
+          try {
+            approveTxHash = (await writeContract(wagmiConfig, {
+              address: USDC_ADDRESS as Address,
+              abi: ERC20_ABI,
+              functionName: "approve",
+              args: [GAME_VAULT_ADDRESS as Address, APPROVE_MAX_USDC_UNITS],
+            })) as string;
+          } catch (error) {
+            throw new Error(
+              toUserFacingWalletError(error, "Approve USDC gagal.", {
+                userRejectedMessage: "Approve USDC dibatalkan di wallet.",
+              }),
+            );
+          }
           emitDepositProgress(
             "approve_pending",
             "Approve tx submitted. Waiting confirmation...",
           );
-          await waitForTransactionReceipt(wagmiConfig, {
-            hash: approveTxHash as Hash,
-          });
+          try {
+            await waitForTransactionReceipt(wagmiConfig, {
+              hash: approveTxHash as Hash,
+            });
+          } catch (error) {
+            throw new Error(
+              toUserFacingWalletError(error, "Approve USDC belum terkonfirmasi.", {
+                networkMessage:
+                  "Konfirmasi approve belum terbaca. Cek wallet atau explorer lalu coba lagi.",
+              }),
+            );
+          }
         }
 
         emitDepositProgress("deposit_sign", "Sign 2/2: deposit USDC to vault.");
-        const depositTxHash = (await writeContract(wagmiConfig, {
-          address: GAME_VAULT_ADDRESS as Address,
-          abi: GAME_VAULT_ABI,
-          functionName: "deposit",
-          args: [amountUnits],
-        })) as string;
+        let depositTxHash: string;
+        try {
+          depositTxHash = (await writeContract(wagmiConfig, {
+            address: GAME_VAULT_ADDRESS as Address,
+            abi: GAME_VAULT_ABI,
+            functionName: "deposit",
+            args: [amountUnits],
+          })) as string;
+        } catch (error) {
+          throw new Error(
+            toUserFacingWalletError(error, "Deposit gagal.", {
+              userRejectedMessage: "Deposit dibatalkan di wallet.",
+            }),
+          );
+        }
         emitDepositProgress(
           "deposit_pending",
           "Deposit tx submitted. Waiting confirmation...",
         );
-        await waitForTransactionReceipt(wagmiConfig, {
-          hash: depositTxHash as Hash,
-        });
+        try {
+          await waitForTransactionReceipt(wagmiConfig, {
+            hash: depositTxHash as Hash,
+          });
+        } catch (error) {
+          throw new Error(
+            toUserFacingWalletError(error, "Deposit belum terkonfirmasi.", {
+              networkMessage:
+                "Konfirmasi deposit belum terbaca. Cek wallet atau explorer lalu coba lagi.",
+            }),
+          );
+        }
         emitDepositProgress("done", "Deposit confirmed.");
 
         return {
@@ -841,9 +878,13 @@ export function GameBridgeClient({
           }
         } catch (err) {
           throw new Error(
-            normalizeError(
+            toUserFacingWalletError(
               err,
               "Pending settlement belum selesai. Selesaikan dulu sebelum start bet baru.",
+              {
+                userRejectedMessage:
+                  "Settlement session lama dibatalkan di wallet. Selesaikan dulu sebelum start bet lagi.",
+              },
             ),
           );
         }
@@ -859,7 +900,7 @@ export function GameBridgeClient({
           payload = await pendingStart;
         } catch (error) {
           throw new Error(
-            normalizeError(error, "Gagal memulai game di backend."),
+            toUserFacingWalletError(error, "Gagal memulai game di backend."),
           );
         }
 
@@ -909,7 +950,9 @@ export function GameBridgeClient({
         } catch (error) {
           socket.emit("game:abort_start", { sessionId: payload.sessionId });
           throw new Error(
-            normalizeError(error, "Transaksi startSession gagal."),
+            toUserFacingWalletError(error, "Transaksi startSession gagal.", {
+              userRejectedMessage: "Start bet dibatalkan di wallet.",
+            }),
           );
         }
       },
@@ -933,12 +976,21 @@ export function GameBridgeClient({
           throw new Error("Payload settlement dari backend tidak lengkap.");
         }
 
-        const txHash = await writeAndConfirm({
-          address: GAME_SETTLEMENT_ADDRESS as Address,
-          abi: GAME_SETTLEMENT_ABI,
-          functionName: "settleWithSignature",
-          args: [resolution, signature as `0x${string}`],
-        });
+        let txHash: string;
+        try {
+          txHash = await writeAndConfirm({
+            address: GAME_SETTLEMENT_ADDRESS as Address,
+            abi: GAME_SETTLEMENT_ABI,
+            functionName: "settleWithSignature",
+            args: [resolution, signature as `0x${string}`],
+          });
+        } catch (error) {
+          throw new Error(
+            toUserFacingWalletError(error, "Transaksi cash out gagal.", {
+              userRejectedMessage: "Cash out dibatalkan di wallet.",
+            }),
+          );
+        }
 
         await backendPost<{ success: boolean }>("/api/game/clear-settlement", {
           sessionId: payload.sessionId,
@@ -977,12 +1029,21 @@ export function GameBridgeClient({
           return null;
         }
 
-        const txHash = await writeAndConfirm({
-          address: GAME_SETTLEMENT_ADDRESS as Address,
-          abi: GAME_SETTLEMENT_ABI,
-          functionName: "settleWithSignature",
-          args: [resolution, signature as `0x${string}`],
-        });
+        let txHash: string;
+        try {
+          txHash = await writeAndConfirm({
+            address: GAME_SETTLEMENT_ADDRESS as Address,
+            abi: GAME_SETTLEMENT_ABI,
+            functionName: "settleWithSignature",
+            args: [resolution, signature as `0x${string}`],
+          });
+        } catch (error) {
+          throw new Error(
+            toUserFacingWalletError(error, "Settlement run gagal.", {
+              userRejectedMessage: "Settlement run dibatalkan di wallet.",
+            }),
+          );
+        }
 
         await backendPost<{ success: boolean }>("/api/game/clear-settlement", {
           sessionId: payload.sessionId,

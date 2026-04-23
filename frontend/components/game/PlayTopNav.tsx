@@ -35,6 +35,7 @@ export function PlayTopNav() {
   const [isDepositBusy, setIsDepositBusy] = useState(false);
   const [isWalletMenuOpen, setIsWalletMenuOpen] = useState(false);
   const [transientStatus, setTransientStatus] = useState<PlayStatusState | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
   const walletMenuRef = useRef<HTMLDivElement | null>(null);
   const statusTimeoutRef = useRef<number | null>(null);
 
@@ -177,6 +178,47 @@ export function PlayTopNav() {
     }
   }, [isConnected]);
 
+  useEffect(() => {
+    const navEl = navRef.current;
+    if (!navEl) return;
+
+    const rootStyle = document.documentElement.style;
+    let frameId: number | null = null;
+
+    const updateHudOffset = () => {
+      const { bottom } = navEl.getBoundingClientRect();
+      rootStyle.setProperty("--play-nav-hud-offset", `${Math.ceil(bottom + 14)}px`);
+    };
+
+    const scheduleUpdate = () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        updateHudOffset();
+      });
+    };
+
+    scheduleUpdate();
+
+    const resizeObserver = new ResizeObserver(() => {
+      scheduleUpdate();
+    });
+    resizeObserver.observe(navEl);
+    window.addEventListener("resize", scheduleUpdate);
+
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", scheduleUpdate);
+      rootStyle.removeProperty("--play-nav-hud-offset");
+    };
+  }, []);
+
   let statusTone: PlayStatusTone = "ready";
   let statusMessage = "READY TO PLAY";
   let statusActionLabel = "";
@@ -223,7 +265,7 @@ export function PlayTopNav() {
     !transientStatus?.message;
 
   return (
-    <nav className="play-nav">
+    <nav ref={navRef} className="play-nav">
       <div className="play-nav-row">
         <div ref={walletMenuRef} className="play-wallet-menu">
           <button

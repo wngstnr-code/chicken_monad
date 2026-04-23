@@ -13,6 +13,10 @@ import {
 import { backendFetch, backendPost } from "../../lib/backend/api";
 import { BACKEND_API_URL, hasBackendApiConfig } from "../../lib/backend/config";
 import { MONAD_CHAIN, hasMonadChainConfig } from "../../lib/web3/monad";
+import {
+  readRawErrorMessage,
+  toUserFacingWalletError,
+} from "../../lib/errors";
 
 type WalletContextValue = {
   account: string;
@@ -81,10 +85,7 @@ function readSwitchErrorCode(error: unknown) {
 }
 
 function readErrorMessage(error: unknown, fallback: string) {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as ChainSwitchError).message || fallback);
-  }
-  return fallback;
+  return readRawErrorMessage(error, fallback);
 }
 
 function getEip1193Provider() {
@@ -131,7 +132,11 @@ export function WalletProvider({ children }: WalletProviderProps) {
     try {
       await connectAsync({ connector: selectedConnector });
     } catch (connectError) {
-      setError(readErrorMessage(connectError, "Gagal connect wallet."));
+      setError(
+        toUserFacingWalletError(connectError, "Gagal connect wallet.", {
+          userRejectedMessage: "Connect wallet dibatalkan.",
+        }),
+      );
     }
   }
 
@@ -189,7 +194,11 @@ export function WalletProvider({ children }: WalletProviderProps) {
         readErrorMessage(switchError, "").toLowerCase().includes("unrecognized");
 
       if (!shouldTryAddChain) {
-        setError(readErrorMessage(switchError, "Gagal switch ke chain Monad."));
+        setError(
+          toUserFacingWalletError(switchError, "Gagal switch ke chain Monad.", {
+            userRejectedMessage: "Switch chain dibatalkan di wallet.",
+          }),
+        );
         return;
       }
     }
@@ -198,7 +207,15 @@ export function WalletProvider({ children }: WalletProviderProps) {
       await addMonadChainToWallet();
       await switchChainAsync({ chainId: MONAD_CHAIN.chainIdDecimal });
     } catch (addChainError) {
-      setError(readErrorMessage(addChainError, "Gagal menambahkan chain Monad."));
+      setError(
+        toUserFacingWalletError(
+          addChainError,
+          "Gagal menambahkan chain Monad.",
+          {
+            userRejectedMessage: "Penambahan chain dibatalkan di wallet.",
+          },
+        ),
+      );
     }
   }
 
@@ -269,7 +286,11 @@ export function WalletProvider({ children }: WalletProviderProps) {
       return true;
     } catch (authError) {
       setBackendAddress("");
-      setBackendAuthError(readErrorMessage(authError, "Gagal auth ke backend."));
+      setBackendAuthError(
+        toUserFacingWalletError(authError, "Gagal auth ke backend.", {
+          userRejectedMessage: "Sign in backend dibatalkan di wallet.",
+        }),
+      );
       return false;
     } finally {
       setBackendAuthLoading(false);

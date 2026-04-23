@@ -91,19 +91,88 @@ function dispatchPlayStatus({ message = "", tone = "info", sticky = false, clear
   );
 }
 
-function formatBridgeError(error, fallback) {
-  if (error && typeof error === "object" && "message" in error) {
-    return String(error.message || fallback);
+function formatBridgeError(error, fallback, userRejectedMessage) {
+  const rawMessage =
+    typeof error === "string"
+      ? String(error || "").trim()
+      : error && typeof error === "object" && "message" in error
+        ? String(error.message || "").trim()
+        : "";
+
+  const message = rawMessage || fallback;
+  const lower = message.toLowerCase();
+
+  if (isUserRejectedBridgeError(error)) {
+    return userRejectedMessage || "Permintaan dibatalkan di wallet.";
   }
-  return fallback;
+
+  if (
+    lower.includes("already pending") ||
+    lower.includes("pending request") ||
+    lower.includes("request of type") ||
+    lower.includes("user is already processing")
+  ) {
+    return "Masih ada permintaan wallet yang belum selesai.";
+  }
+
+  if (
+    lower.includes("insufficient funds") ||
+    lower.includes("gas required exceeds allowance") ||
+    lower.includes("intrinsic gas too low") ||
+    lower.includes("exceeds allowance")
+  ) {
+    return "Saldo gas wallet tidak cukup untuk transaksi.";
+  }
+
+  if (
+    lower.includes("failed to fetch") ||
+    lower.includes("fetch failed") ||
+    lower.includes("network error") ||
+    lower.includes("network request failed") ||
+    lower.includes("timeout") ||
+    lower.includes("timed out") ||
+    lower.includes("disconnected") ||
+    lower.includes("socket hang up") ||
+    lower.includes("rpc")
+  ) {
+    return "Koneksi wallet atau RPC bermasalah. Coba lagi.";
+  }
+
+  let simplified = message.split(/\r?\n/)[0]?.trim() || "";
+  ["Details:", "Request Arguments:", "Request body:", "URL:", "Version:"].forEach((marker) => {
+    const index = simplified.indexOf(marker);
+    if (index >= 0) {
+      simplified = simplified.slice(0, index).trim();
+    }
+  });
+  simplified = simplified.replace(/^execution reverted:?\s*/i, "").trim();
+
+  if (!simplified) return fallback;
+  if (simplified.length > 140) return fallback;
+  if (
+    simplified.toLowerCase().includes("details:") ||
+    simplified.toLowerCase().includes("request arguments:") ||
+    simplified.toLowerCase().includes("version:")
+  ) {
+    return fallback;
+  }
+
+  return simplified;
 }
 
 function isUserRejectedBridgeError(error) {
-  const message = formatBridgeError(error, "").toLowerCase();
+  const message =
+    typeof error === "string"
+      ? String(error || "").toLowerCase()
+      : error && typeof error === "object" && "message" in error
+        ? String(error.message || "").toLowerCase()
+        : "";
   return (
+    message.includes("userrejectedrequesterror") ||
     message.includes("user rejected") ||
     message.includes("rejected the request") ||
-    message.includes("user denied")
+    message.includes("user denied") ||
+    message.includes("rejected by user")
   );
 }
 
@@ -201,7 +270,11 @@ async function startBet(stake) {
       const result = await getBridge().startBet(stake);
       return activateBet(stake, result.availableBalance);
     } catch (error) {
-      const message = formatBridgeError(error, "Failed to start live bet.");
+      const message = formatBridgeError(
+        error,
+        "Failed to start live bet.",
+        "Start bet dibatalkan di wallet."
+      );
       console.error("Failed to start live bet:", error);
       window.dispatchEvent(new CustomEvent("chicken:game-error", { detail: { message } }));
       void loadBalance();
@@ -307,7 +380,11 @@ async function cashOut(reason) {
       const fallbackMessage = isUserRejectedBridgeError(error)
         ? "Cash out dibatalkan di wallet. Selesaikan pending settlement lalu start bet lagi."
         : "Failed to settle cashout.";
-      const message = formatBridgeError(error, fallbackMessage);
+      const message = formatBridgeError(
+        error,
+        fallbackMessage,
+        "Cash out dibatalkan di wallet."
+      );
       keepStatusMessage = true;
       dispatchPlayStatus({
         message,
@@ -386,7 +463,11 @@ async function crashBet(reason) {
       });
     } catch (error) {
       console.error("Failed to settle crash:", error);
-      const message = error?.message || "Failed to settle crash.";
+      const message = formatBridgeError(
+        error,
+        "Failed to settle crash.",
+        "Settlement run dibatalkan di wallet."
+      );
       keepStatusMessage = true;
       dispatchPlayStatus({
         message,
@@ -2748,7 +2829,11 @@ function initBettingUI() {
           closeDepositModal();
         }, 350);
       } catch (error) {
-        const message = formatBridgeError(error, "Deposit gagal.");
+        const message = formatBridgeError(
+          error,
+          "Deposit gagal.",
+          "Deposit dibatalkan di wallet."
+        );
         setDepositStatus(message, true);
         dispatchPlayStatus({
           message,
@@ -2797,7 +2882,11 @@ function initBettingUI() {
         });
         setDepositButtonState("DEPOSIT", false);
       } catch (error) {
-        const message = formatBridgeError(error, "Claim faucet gagal.");
+        const message = formatBridgeError(
+          error,
+          "Claim faucet gagal.",
+          "Claim faucet dibatalkan di wallet."
+        );
         setDepositStatus(message, true);
         dispatchPlayStatus({
           message,
