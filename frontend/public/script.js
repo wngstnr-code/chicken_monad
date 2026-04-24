@@ -503,15 +503,25 @@ async function crashBet(reason) {
     settlementPending = true;
     setBetButtonState();
     let keepStatusMessage = false;
-    dispatchPlayStatus({
-      message: "SETTLING RUN RESULT...",
-      tone: "busy",
-      sticky: true,
-    });
     const mult = getCurrentEffectiveMultiplierBp() / 10000;
     const lostStake = bet.stake;
     bet.active = false;
     stopBetTicker();
+    showBetHud(false);
+    showResult({
+      type: "crash",
+      stake: lostStake,
+      multiplier: mult,
+      payout: 0,
+      profit: -lostStake,
+      rows: bet.maxRow,
+      cp: bet.currentCp,
+    });
+    dispatchPlayStatus({
+      message: "CRASHED. SETTLING...",
+      tone: "warning",
+      sticky: true,
+    });
 
     try {
       const result = await getBridge().crash(reason || "collision");
@@ -519,7 +529,6 @@ async function crashBet(reason) {
         bet.balance = result.availableBalance;
         renderBalance();
       }
-      showBetHud(false);
       showResult({
         type: "crash",
         stake: lostStake,
@@ -2059,7 +2068,7 @@ window.addEventListener("keydown", (event) => {
 });
 
 function hitTest() {
-  if (gameOver) return;
+  if (gameOver || settlementPending) return;
   const row = metadata[position.currentRow - 1];
   if (!row) return;
 
