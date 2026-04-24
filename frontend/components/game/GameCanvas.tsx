@@ -14,8 +14,6 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
 
       <div id="top-bar">
         <div id="top-bar-left">
-
-
           <div className="stat-card score-card">
             <div className="score-card-main">
               <div className="score-metric">
@@ -38,8 +36,7 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
             <div
               id="bet-hud-active"
               className="bet-hud-active"
-              style={{ display: "none" }}
-            >
+              style={{ display: "none" }}>
               <div className="bet-hud-metric-grid">
                 <div className="bet-hud-metric bet-hud-metric-primary">
                   <span className="bet-hud-metric-label">STAKE</span>
@@ -51,8 +48,7 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
                   <span className="bet-hud-metric-label">CASH OUT</span>
                   <span
                     id="bet-payout"
-                    className="bet-hud-metric-value payout-value"
-                  >
+                    className="bet-hud-metric-value payout-value">
                     $0.00
                   </span>
                 </div>
@@ -60,8 +56,7 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
                   <span className="bet-hud-metric-label">MULTIPLIER</span>
                   <span
                     id="bet-multiplier"
-                    className="bet-hud-metric-value multiplier-value"
-                  >
+                    className="bet-hud-metric-value multiplier-value">
                     0.00x
                   </span>
                 </div>
@@ -70,8 +65,7 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
               <div
                 id="bet-hud-decay"
                 className="bet-hud-decay"
-                style={{ display: "none" }}
-              >
+                style={{ display: "none" }}>
                 <span className="bet-hud-decay-label">DECAYING</span>
                 <span id="bet-decay" className="bet-hud-decay-value">
                   -0.1x
@@ -87,13 +81,10 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
               id="cash-out-btn"
               className="disabled"
               disabled
-              style={{ display: "none" }}
-            >
+              style={{ display: "none" }}>
               CASH OUT
             </button>
           </div>
-
-
         </div>
         <div id="top-bar-center">
           <div className="stat-card">
@@ -129,7 +120,7 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
             X
           </button>
           <h2>PLACE YOUR BET</h2>
-          <p className="subtitle">Mock USD - No blockchain (demo)</p>
+          <p className="subtitle">Mock USD - Testnet Demo</p>
 
           <div className="field">
             <label>STAKE ($)</label>
@@ -274,27 +265,23 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
         id="game-help-btn"
         className="fixed-help"
         type="button"
-        title="Game Rules"
-      >
+        title="Game Rules">
         ?
       </button>
 
       <div
         id="game-help-modal"
         className="info-modal-overlay"
-        style={{ display: "none" }}
-      >
+        style={{ display: "none" }}>
         <div
           className="info-modal-box"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="game-help-title"
-        >
+          aria-labelledby="game-help-title">
           <button
             className="info-modal-close"
             id="game-help-close"
-            aria-label="Close"
-          >
+            aria-label="Close">
             X
           </button>
           <h2 id="game-help-title">GAME RULES</h2>
@@ -350,8 +337,7 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
           <button
             className="flow-btn secondary info-modal-action"
             id="game-help-got-it"
-            type="button"
-          >
+            type="button">
             GOT IT
           </button>
         </div>

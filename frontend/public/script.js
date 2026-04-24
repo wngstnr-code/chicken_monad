@@ -6,7 +6,7 @@ const tilesPerRow = maxTileIndex - minTileIndex + 1;
 const tileSize = 42;
 
 // ============================================================
-// BETTING SYSTEM (mock, in-memory + localStorage — no blockchain)
+// BETTING SYSTEM (mock, in-memory + localStorage — Testnet Demo only)
 // ============================================================
 
 const STEP_INCREMENT_BP = 250; // +0.025x per forward step
@@ -131,10 +131,7 @@ function playTone({
   osc.type = type;
   osc.frequency.setValueAtTime(frequency, now);
   if (isFinite(frequencyEnd) && frequencyEnd > 0) {
-    osc.frequency.exponentialRampToValueAtTime(
-      frequencyEnd,
-      now + durationSec,
-    );
+    osc.frequency.exponentialRampToValueAtTime(frequencyEnd, now + durationSec);
   }
 
   gain.gain.setValueAtTime(0.0001, now);
