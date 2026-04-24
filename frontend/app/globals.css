@@ -540,14 +540,8 @@ canvas.game {
   box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.35);
 }
 
-.modal-actions-deposit .deposit-action-divider {
-  width: 100%;
-  border-top: 2px dashed rgba(44, 62, 80, 0.38);
-  margin: 6px 0 4px;
-}
-
 .modal-actions-deposit {
-  gap: 2px;
+  gap: 10px;
 }
 
 .modal-actions button.faucet {
@@ -1881,9 +1875,9 @@ canvas.game {
   flex-direction: column;
   gap: 6px;
   padding: 10px 12px;
-  border-radius: 10px;
-  border: 2px dashed rgba(44, 62, 80, 0.34);
-  background: rgba(44, 62, 80, 0.08);
+  border-radius: 8px;
+  border: 1px dashed rgba(44, 62, 80, 0.28);
+  background: rgba(44, 62, 80, 0.09);
 }
 
 .deposit-balances p {
@@ -2620,9 +2614,9 @@ canvas.game {
 
 .money-page {
   position: relative;
-  align-items: stretch;
+  align-items: center;
   justify-content: center;
-  padding: 32px 24px;
+  padding: 24px;
   overflow-x: hidden;
   overflow-y: auto;
   background: none;
@@ -2656,122 +2650,166 @@ canvas.game {
 .money-card {
   position: relative;
   z-index: 2;
-  width: min(980px, 100%);
+  width: min(900px, 100%);
+  padding: 16px 18px 16px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 8px;
 }
 
 .money-header {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
+}
+
+.money-head-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.money-head-top .flow-eyebrow {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 2.4px;
+}
+
+.money-head-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.money-head-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f7fbff;
+  font-size: 7px;
+  letter-spacing: 0.8px;
+  line-height: 1.2;
+}
+
+.money-head-badge-ready {
+  color: #79f0be;
+  border-color: rgba(121, 240, 190, 0.26);
+  background: rgba(34, 94, 72, 0.28);
+}
+
+.money-head-badge-warning {
+  color: #ffe066;
+  border-color: rgba(255, 224, 102, 0.26);
+  background: rgba(104, 80, 17, 0.3);
 }
 
 .money-title {
-  margin-bottom: 6px;
-  font-size: clamp(22px, 3vw, 32px);
-}
-
-.money-copy {
-  max-width: 760px;
-  margin-bottom: 0;
-}
-
-.money-banner-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.money-banner-card {
-  padding: 14px 16px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-
-.money-banner-label {
-  display: block;
-  margin-bottom: 8px;
-  color: rgba(255, 224, 102, 0.86);
-  font-size: 8px;
-  letter-spacing: 1px;
-}
-
-.money-banner-card strong {
-  display: block;
-  color: #f7fbff;
-  font-size: 10px;
-  line-height: 1.7;
+  margin: 0;
+  font-size: clamp(34px, 5.2vw, 56px);
+  line-height: 0.92;
 }
 
 .money-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
 }
 
 .money-status-panel {
   margin-bottom: 0;
   height: 100%;
+  padding: 10px;
+  display: flex;
+  align-items: stretch;
+}
+
+.money-status-grid {
+  width: 100%;
+  flex: 1 1 auto;
 }
 
 .money-status-grid {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  height: 100%;
+  align-content: stretch;
 }
 
 .money-status-row {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  min-height: 68px;
+  padding: 8px 10px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .money-status-row span {
   color: rgba(221, 232, 255, 0.8);
-  font-size: 8px;
+  font-size: 7px;
   letter-spacing: 1px;
 }
 
 .money-status-row strong {
   color: #ffe066;
-  font-size: 9px;
-  text-align: right;
+  font-size: 8px;
+  text-align: left;
+  line-height: 1.35;
+  word-break: break-word;
 }
 
 .money-action-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 5px;
+  min-height: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.money-action-panel .flow-alert,
+.money-action-panel .flow-success {
+  margin: 0;
 }
 
 .money-amount-block {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 5px;
 }
 
 .money-input {
-  font-size: 18px;
+  margin-bottom: 0;
+  font-size: 16px;
+  padding: 9px 12px;
 }
 
 .money-quick-picks {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px;
 }
 
 .money-quick-pick {
   font-family: inherit;
-  font-size: 9px;
-  padding: 10px 12px;
+  font-size: 7px;
+  padding: 6px 8px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.08);
@@ -2787,8 +2825,12 @@ canvas.game {
 }
 
 .money-primary-btn {
+  display: flex;
+  align-items: center;
   width: 100%;
   justify-content: center;
+  padding: 11px 14px;
+  font-size: 12px;
   background: linear-gradient(180deg, #f7df82 0%, #e3be4d 100%);
   color: #2a1b53;
   border: 2px solid rgba(73, 50, 133, 0.42);
@@ -2800,12 +2842,14 @@ canvas.game {
 .money-secondary-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 6px;
 }
 
 .money-secondary-btn {
   width: 100%;
   justify-content: center;
+  padding: 8px 10px;
+  font-size: 10px;
 }
 
 .money-faucet-btn {
@@ -2823,13 +2867,22 @@ canvas.game {
 .money-helper {
   margin: 0;
   color: rgba(225, 235, 255, 0.78);
-  font-size: 9px;
-  line-height: 1.8;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.money-panel-footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 6px;
+  padding-top: 6px;
 }
 
 .money-activity {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 16px;
+  padding-top: 12px;
 }
 
 .money-activity-eyebrow {
@@ -2838,14 +2891,16 @@ canvas.game {
 
 .money-activity-list {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .money-activity-item {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -2856,46 +2911,45 @@ canvas.game {
 .money-activity-item a,
 .money-activity-item .mono {
   color: #ffe066;
+  word-break: break-all;
 }
 
 .money-footer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 12px;
-  padding-top: 4px;
+  display: grid;
+  grid-template-columns: 1fr;
+  width: 100%;
+  gap: 6px;
 }
 
-.money-footer-btn {
-  min-width: 220px;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.06) !important;
-}
-
-.money-footer-btn-accent {
-  background: rgba(255, 224, 102, 0.1) !important;
-  border-color: rgba(255, 224, 102, 0.26) !important;
+.money-panel-nav-btn {
+  text-decoration: none;
 }
 
 @media (max-width: 768px) {
   .money-page {
     padding: 18px 14px;
+    align-items: stretch;
   }
 
   .money-card {
-    gap: 14px;
+    gap: 12px;
+    padding: 16px;
   }
 
-  .money-banner-grid,
   .money-grid,
-  .money-secondary-actions {
+  .money-status-grid,
+  .money-secondary-actions,
+  .money-activity-list,
+  .money-footer-actions {
     grid-template-columns: 1fr;
   }
 
-  .money-status-row,
-  .money-activity-item {
-    flex-direction: column;
+  .money-head-top {
     align-items: flex-start;
+  }
+
+  .money-head-badges {
+    justify-content: flex-start;
   }
 
   .money-status-row strong,

@@ -33,13 +33,6 @@ function readWalletStatus(flow: DepositFlowViewModel) {
   return "Connected (Monad)";
 }
 
-function readNextStep(flow: DepositFlowViewModel) {
-  if (!flow.isConnected) return "Connect wallet from home or dashboard first.";
-  if (!flow.isMonadChain) return "Switch ke Monad dulu sebelum transaksi.";
-  if (flow.needsApproval) return "Approve USDC sekali, lalu deposit berikutnya lebih cepat.";
-  return "Vault siap dipakai untuk deposit, withdraw, dan play.";
-}
-
 function readPrimaryLabel(flow: DepositFlowViewModel) {
   if (flow.isDepositBusy) return "PROCESSING...";
   if (flow.isApproveBusy) return "APPROVING...";
@@ -51,7 +44,7 @@ export function ManageMoneyPage() {
   const flow = useDepositFlow();
 
   const returnHref = flow.isConnected ? "/dashboard" : "/";
-  const returnLabel = flow.isConnected ? "BACK TO DASHBOARD" : "RETURN TO HOME";
+  const returnLabel = flow.isConnected ? "DASHBOARD" : "HOME";
   const walletPreset = readQuickAmount(flow.walletBalanceDisplay);
   const vaultPreset = readQuickAmount(flow.availableBalanceDisplay);
 
@@ -148,24 +141,25 @@ export function ManageMoneyPage() {
 
       <section className="flow-card money-card">
         <header className="money-header">
-          <p className="flow-eyebrow">CHICKEN VAULT</p>
+          <div className="money-head-top">
+            <p className="flow-eyebrow">CHICKEN VAULT</p>
+            <div className="money-head-badges">
+              <span className="money-head-badge">
+                FAUCET {flow.faucetClaimAmountDisplay} USDC
+              </span>
+              <span
+                className={`money-head-badge ${
+                  flow.needsApproval
+                    ? "money-head-badge-warning"
+                    : "money-head-badge-ready"
+                }`}
+              >
+                {flow.needsApproval ? "APPROVAL NEEDED" : "VAULT READY"}
+              </span>
+            </div>
+          </div>
           <h1 className="flow-title money-title">Manage Money</h1>
-          <p className="flow-copy money-copy">
-            Top up dari faucet, pindahkan USDC ke vault, lalu withdraw balance
-            yang sudah available sebelum balik main.
-          </p>
         </header>
-
-        <div className="money-banner-grid">
-          <article className="money-banner-card">
-            <span className="money-banner-label">NEXT STEP</span>
-            <strong>{readNextStep(flow)}</strong>
-          </article>
-          <article className="money-banner-card">
-            <span className="money-banner-label">FAUCET REWARD</span>
-            <strong>{flow.faucetClaimAmountDisplay} USDC / CLAIM</strong>
-          </article>
-        </div>
 
         <div className="money-grid">
           <section className="flow-status money-status-panel">
@@ -267,10 +261,22 @@ export function ManageMoneyPage() {
               </button>
             </div>
 
-            <p className="money-helper">
-              Deposit pakai amount di atas. Withdraw hanya bisa dari balance yang
-              sudah available di vault.
-            </p>
+            <div className="money-panel-footer">
+              <div className="money-footer-actions">
+                <a
+                  href={returnHref}
+                  className="flow-btn money-primary-btn money-panel-nav-btn"
+                >
+                  {returnLabel}
+                </a>
+                <a
+                  href="/play"
+                  className="flow-btn money-primary-btn money-panel-nav-btn"
+                >
+                  PLAY GAME
+                </a>
+              </div>
+            </div>
           </section>
         </div>
 
@@ -294,17 +300,6 @@ export function ManageMoneyPage() {
           </section>
         ) : null}
 
-        <div className="money-footer-actions">
-          <a href={returnHref} className="flow-btn secondary money-footer-btn">
-            {returnLabel}
-          </a>
-          <a
-            href="/play"
-            className="flow-btn secondary money-footer-btn money-footer-btn-accent"
-          >
-            PLAY GAME
-          </a>
-        </div>
       </section>
     </main>
   );

@@ -237,13 +237,12 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
             <button id="deposit-confirm" className="primary">
               DEPOSIT NOW
             </button>
-            <div className="deposit-action-divider" aria-hidden="true" />
             <button id="deposit-faucet" className="faucet">
               CLAIM FAUCET
             </button>
-            <div className="deposit-action-divider" aria-hidden="true" />
             <a id="deposit-manage-funds" className="manage" href="/managemoney">
-              MANAGE FUNDS
+              MANAGE MONEY
+              MANAGE MONEY
             </a>
           </div>
         </div>
