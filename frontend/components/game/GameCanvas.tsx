@@ -242,7 +242,7 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
               CLAIM FAUCET
             </button>
             <div className="deposit-action-divider" aria-hidden="true" />
-            <a id="deposit-manage-funds" className="manage" href="/deposit">
+            <a id="deposit-manage-funds" className="manage" href="/managemoney">
               MANAGE FUNDS
             </a>
           </div>

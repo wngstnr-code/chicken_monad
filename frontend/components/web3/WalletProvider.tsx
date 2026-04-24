@@ -23,7 +23,7 @@ type WalletContextValue = {
   isConnecting: boolean;
   error: string;
   connectWallet: () => Promise<void>;
-  disconnectWallet: () => void;
+  disconnectWallet: () => Promise<void>;
   switchToMonad: () => Promise<void>;
   clearWalletError: () => void;
   hasMonadChainConfig: boolean;
@@ -100,7 +100,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
   const [backendAuthError, setBackendAuthError] = useState("");
   const { open } = useAppKit();
   const { address, chainId, isConnected } = useAccount();
-  const { disconnect } = useDisconnect();
+  const { disconnectAsync } = useDisconnect();
   const { signMessageAsync } = useSignMessage();
   const { switchChainAsync, isPending: isSwitchPending } = useSwitchChain();
 
@@ -136,13 +136,19 @@ export function WalletProvider({ children }: WalletProviderProps) {
     }
   }
 
-  function disconnectWallet() {
-    disconnect();
+  async function disconnectWallet() {
     setError("");
     setBackendAddress("");
     setBackendAuthError("");
+
+    try {
+      await disconnectAsync();
+    } catch {
+      // Keep frontend state cleared even if the wallet adapter throws.
+    }
+
     if (hasBackendConfig) {
-      void logoutBackend();
+      await logoutBackend();
     }
   }
 

@@ -1,7 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { formatUnits, isAddress } from "viem";
+import type { Address } from "viem";
+import { useReadContract } from "wagmi";
 import { useWallet } from "../../components/web3/WalletProvider";
+import {
+  ERC20_ABI,
+  USDC_ADDRESS,
+  USDC_DECIMALS,
+} from "../../lib/web3/contracts";
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
+const HOME_CONNECT_PROMPT_KEY = "chicken-home-connect-prompt";
 
 function shortAddress(address: string) {
   if (!address) return "-";
@@ -10,15 +21,82 @@ function shortAddress(address: string) {
 
 export default function DashboardPage() {
   const [showHelp, setShowHelp] = useState(false);
-  const { account, isConnecting, connectWallet, disconnectWallet } = useWallet();
+  const [showProfilePopover, setShowProfilePopover] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const profileWrapRef = useRef<HTMLDivElement | null>(null);
+  const {
+    account,
+    isMonadChain,
+    isConnecting,
+    connectWallet,
+    disconnectWallet,
+  } = useWallet();
   const isConnected = Boolean(account);
+  const showConnectedDashboardUi = isConnected && !isLoggingOut;
+  const ownerAddress = isAddress(account) ? (account as Address) : undefined;
+  const usdcAddress = isAddress(USDC_ADDRESS)
+    ? (USDC_ADDRESS as Address)
+    : undefined;
+
+  const { data: walletUsdcData } = useReadContract({
+    address: usdcAddress || ZERO_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: [ownerAddress || ZERO_ADDRESS],
+    query: {
+      enabled: Boolean(isConnected && ownerAddress && usdcAddress),
+    },
+  });
+
+  const walletUsdcDisplay =
+    walletUsdcData === undefined
+      ? "-"
+      : formatUnits(walletUsdcData, USDC_DECIMALS);
+
+  useEffect(() => {
+    if (!showProfilePopover) return;
+
+    function onMouseDown(event: MouseEvent) {
+      const target = event.target as Node | null;
+      if (
+        profileWrapRef.current &&
+        target &&
+        !profileWrapRef.current.contains(target)
+      ) {
+        setShowProfilePopover(false);
+      }
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowProfilePopover(false);
+      }
+    }
+
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showProfilePopover]);
 
   function onConnect() {
     void connectWallet();
   }
 
-  function onLogout() {
-    disconnectWallet();
+  async function onLogout() {
+    setShowProfilePopover(false);
+    setIsLoggingOut(true);
+    try {
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(HOME_CONNECT_PROMPT_KEY, "1");
+      }
+      await disconnectWallet();
+    } finally {
+      window.location.assign("/?connect=1");
+    }
   }
 
   return (
@@ -45,10 +123,75 @@ export default function DashboardPage() {
 
           <div className="home-nav-cluster">
             <div className="home-nav-actions">
-              {isConnected ? (
-                <button type="button" className="flow-btn secondary home-nav-login">
-                  {shortAddress(account)}
-                </button>
+              {showConnectedDashboardUi || isLoggingOut ? (
+                <div className="home-profile-wrap" ref={profileWrapRef}>
+                  <button
+                    type="button"
+                    className="flow-btn secondary home-nav-login"
+                    disabled={isLoggingOut}
+                    onClick={() => setShowProfilePopover((current) => !current)}
+                  >
+                    {isLoggingOut ? "LOGGING OUT..." : shortAddress(account)}
+                  </button>
+
+                  {showProfilePopover && !isLoggingOut && (
+                    <section
+                      className="flow-status home-profile-popover"
+                      style={{ color: "white" }}
+                    >
+                      <p className="home-preview-title home-profile-heading">
+                        PROFILE
+                      </p>
+                      <div className="home-profile-meta">
+                        <div className="home-profile-row">
+                          <span className="home-profile-label">Wallet</span>
+                          <span className="mono home-profile-value">
+                            {shortAddress(account)}
+                          </span>
+                        </div>
+                        <div className="home-profile-row">
+                          <span className="home-profile-label">USDC</span>
+                          <span className="mono home-profile-value">
+                            {walletUsdcDisplay}
+                          </span>
+                        </div>
+                        <div className="home-profile-row">
+                          <span className="home-profile-label">Chain</span>
+                          <span
+                            className={`mono home-profile-value ${
+                              isMonadChain
+                                ? "home-profile-value-ready"
+                                : "home-profile-value-warning"
+                            }`}
+                          >
+                            {isMonadChain ? "MONAD READY" : "SWITCH TO MONAD"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="home-profile-actions">
+                        <a
+                          href="/"
+                          className="flow-btn home-profile-action home-profile-action-dashboard"
+                        >
+                          HOME
+                        </a>
+                        <a
+                          href="/managemoney"
+                          className="flow-btn home-profile-action home-profile-action-manage"
+                        >
+                          MANAGE MONEY
+                        </a>
+                        <button
+                          className="flow-btn home-profile-action home-profile-action-logout"
+                          type="button"
+                          onClick={onLogout}
+                        >
+                          LOG OUT
+                        </button>
+                      </div>
+                    </section>
+                  )}
+                </div>
               ) : (
                 <button
                   type="button"
@@ -64,8 +207,12 @@ export default function DashboardPage() {
         </header>
 
         <div className="dashboard-center">
+          <div className="dashboard-title" aria-label="Chicken Monad">
+            <span className="dashboard-title-line">CHICKEN</span>
+            <span className="dashboard-title-line">MONAD</span>
+          </div>
           <div className="dashboard-actions">
-            {isConnected ? (
+            {showConnectedDashboardUi ? (
               <>
                 <a
                   href="/play"
@@ -81,7 +228,7 @@ export default function DashboardPage() {
                   HOW TO PLAY
                 </button>
                 <a
-                  href="/deposit"
+                  href="/managemoney"
                   className="flow-btn home-btn-main dashboard-btn dashboard-btn-deposit"
                 >
                   MANAGE MONEY
@@ -94,6 +241,14 @@ export default function DashboardPage() {
                   LOG OUT
                 </button>
               </>
+            ) : isLoggingOut ? (
+              <button
+                type="button"
+                className="flow-btn home-btn-main dashboard-btn dashboard-btn-logout"
+                disabled
+              >
+                LOGGING OUT...
+              </button>
             ) : (
               <button
                 type="button"

@@ -3,11 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { formatUnits, isAddress } from "viem";
 import type { Address } from "viem";
-import {
-  useReadContract,
-  useWriteContract,
-  useWaitForTransactionReceipt,
-} from "wagmi";
+import { useReadContract } from "wagmi";
 import { useWallet } from "../components/web3/WalletProvider";
 import { backendFetch } from "../lib/backend/api";
 import { hasBackendApiConfig } from "../lib/backend/config";
@@ -15,8 +11,6 @@ import {
   ERC20_ABI,
   USDC_ADDRESS,
   USDC_DECIMALS,
-  USDC_FAUCET_ABI,
-  USDC_FAUCET_ADDRESS,
 } from "../lib/web3/contracts";
 
 type ProfitLeaderboardEntry = {
@@ -28,6 +22,7 @@ type ProfitLeaderboardEntry = {
 };
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
+const HOME_CONNECT_PROMPT_KEY = "chicken-home-connect-prompt";
 
 const FALLBACK_DISTANCE_BOARD: ChickenBridgeLeaderboardEntry[] = [
   {
@@ -160,23 +155,6 @@ export default function Home() {
       ? "-"
       : formatUnits(walletUsdcData, USDC_DECIMALS);
 
-  const {
-    data: hash,
-    isPending: isClaiming,
-    writeContract,
-  } = useWriteContract();
-  const { isLoading: isWaitingForClaim, isSuccess: isClaimSuccess } =
-    useWaitForTransactionReceipt({ hash });
-
-  function onClaimFaucet() {
-    if (!isAddress(USDC_FAUCET_ADDRESS)) return;
-    writeContract({
-      address: USDC_FAUCET_ADDRESS as Address,
-      abi: USDC_FAUCET_ABI,
-      functionName: "claim",
-    });
-  }
-
   function scrollToSection(sectionId: string) {
     document.getElementById(sectionId)?.scrollIntoView({
       behavior: "smooth",
@@ -265,6 +243,31 @@ export default function Home() {
       setShowHeroConnectPrompt(false);
     }
   }, [isConnected]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const shouldOpenFromQuery = params.get("connect") === "1";
+    const shouldOpenFromLogout =
+      window.sessionStorage.getItem(HOME_CONNECT_PROMPT_KEY) === "1";
+
+    if ((!shouldOpenFromQuery && !shouldOpenFromLogout) || isConnected) {
+      return;
+    }
+
+    setShowHeroConnectPrompt(true);
+    setShowProfilePopover(false);
+    clearWalletError();
+    window.sessionStorage.removeItem(HOME_CONNECT_PROMPT_KEY);
+    window.scrollTo({ top: 0, behavior: "auto" });
+
+    params.delete("connect");
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${
+      nextSearch ? `?${nextSearch}` : ""
+    }${window.location.hash}`;
+    window.history.replaceState({}, "", nextUrl);
+  }, [clearWalletError, isConnected]);
 
   function onLogout() {
     disconnectWallet();
@@ -404,69 +407,56 @@ export default function Home() {
                     className="flow-status home-profile-popover"
                     style={{ color: "white" }}
                   >
-                    <p className="home-preview-title">PROFILE</p>
-                    <p>
-                      Wallet:{" "}
-                      <span className="mono">{shortAddress(account)}</span>
+                    <p className="home-preview-title home-profile-heading">
+                      PROFILE
                     </p>
-                    <p>
-                      Address:{" "}
-                      <span className="mono home-wallet-address">
-                        {account || "-"}
-                      </span>
-                    </p>
-                    <p>
-                      USDC: <span className="mono">{walletUsdcDisplay}</span>
-                    </p>
-                    <p>
-                      Chain:{" "}
-                      <span className="mono">
-                        {isMonadChain ? "MONAD READY" : "SWITCH TO MONAD"}
-                      </span>
-                    </p>
+                    <div className="home-profile-meta">
+                      <div className="home-profile-row">
+                        <span className="home-profile-label">Wallet</span>
+                        <span className="mono home-profile-value">
+                          {shortAddress(account)}
+                        </span>
+                      </div>
+                      <div className="home-profile-row">
+                        <span className="home-profile-label">USDC</span>
+                        <span className="mono home-profile-value">
+                          {walletUsdcDisplay}
+                        </span>
+                      </div>
+                      <div className="home-profile-row">
+                        <span className="home-profile-label">Chain</span>
+                        <span
+                          className={`mono home-profile-value ${
+                            isMonadChain
+                              ? "home-profile-value-ready"
+                              : "home-profile-value-warning"
+                          }`}
+                        >
+                          {isMonadChain ? "MONAD READY" : "SWITCH TO MONAD"}
+                        </span>
+                      </div>
+                    </div>
                     <div className="home-profile-actions">
                       <a
                         href="/dashboard"
-                        className="flow-btn secondary home-profile-deposit"
+                        className="flow-btn home-profile-action home-profile-action-dashboard"
                       >
-                        GO TO DASHBOARD
+                        DASHBOARD
                       </a>
                       <a
-                        href="/deposit"
-                        className="flow-btn secondary home-profile-deposit"
+                        href="/managemoney"
+                        className="flow-btn home-profile-action home-profile-action-manage"
                       >
                         MANAGE MONEY
                       </a>
                       <button
-                        className="flow-btn secondary home-profile-deposit"
-                        type="button"
-                        onClick={onClaimFaucet}
-                        disabled={isClaiming || isWaitingForClaim}
-                      >
-                        {isClaiming || isWaitingForClaim
-                          ? "CLAIMING..."
-                          : "CLAIM FAUCET"}
-                      </button>
-                      <button
-                        className="flow-btn btn-logout home-profile-deposit"
+                        className="flow-btn home-profile-action home-profile-action-logout"
                         type="button"
                         onClick={onLogout}
                       >
                         LOG OUT
                       </button>
                     </div>
-                    {isClaimSuccess && (
-                      <p
-                        className="flow-alert"
-                        style={{
-                          marginTop: 8,
-                          borderColor: "#4caf50",
-                          color: "#4caf50",
-                        }}
-                      >
-                        Faucet claimed successfully!
-                      </p>
-                    )}
                   </section>
                 )}
               </div>
@@ -497,7 +487,7 @@ export default function Home() {
         <div className="home-shell home-shell-wide">
           <div className="home-hero-grid">
             <div className="home-hero-copy">
-              <h1 className="home-title">Chicken Monad</h1>
+              <h1 className="home-title">CHICKEN MONAD</h1>
               <p className="home-subcopy">
                 Cross the road, stack the multiplier, and cash out before the
                 run crashes.
@@ -590,7 +580,7 @@ export default function Home() {
 
           <div className="home-footer-links">
             <a href="/play">PLAY</a>
-            <a href="/deposit">MANAGE MONEY</a>
+            <a href="/managemoney">MANAGE MONEY</a>
             <button type="button" onClick={() => setShowHelp(true)}>
               HOW TO PLAY
             </button>
