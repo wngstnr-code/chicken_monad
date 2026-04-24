@@ -489,7 +489,11 @@ export function PlayTopNav() {
             onClick={onMenuButtonClick}
             aria-expanded={isMenuOpen}
           >
-            MENU
+            <div className="hamburger-icon">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
           </button>
 
           {isMenuOpen && (
@@ -520,9 +524,15 @@ export function PlayTopNav() {
                     </button>
                   </div>
                   <div className="play-menu-modal-separator" />
-                  <a href="/" className="play-menu-modal-item menu-item-home">
+                  <button
+                    type="button"
+                    className="play-menu-modal-item menu-item-home"
+                    onClick={() => {
+                      window.location.href = "/";
+                    }}
+                  >
                     HOME
-                  </a>
+                  </button>
                   <button
                     type="button"
                     className="play-menu-modal-item menu-item-leaderboard"

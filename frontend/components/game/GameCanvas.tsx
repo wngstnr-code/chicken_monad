@@ -14,16 +14,7 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
 
       <div id="top-bar">
         <div id="top-bar-left">
-          <div className="tab-buttons-row">
-            <button
-              id="leaderboard-btn"
-              type="button"
-              aria-expanded="false"
-              aria-controls="leaderboard-modal"
-            >
-              <span className="leaderboard-btn-label">LEADERBOARD</span>
-            </button>
-          </div>
+
 
           <div className="stat-card score-card">
             <div className="score-card-main">
