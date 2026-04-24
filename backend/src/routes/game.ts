@@ -18,6 +18,12 @@ const GAME_SETTLEMENT_READ_ABI = parseAbi([
   "function getSession(bytes32 sessionId) view returns (address player, uint256 stakeAmount, uint64 startedAt, bool active, bool settled)",
 ]);
 
+function parsePaginationParam(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+}
+
 function buildResolutionFromSession(walletAddress: string, session: Record<string, unknown>) {
   const stakeAmount = Number(session.stake_amount ?? 0);
   const payoutAmount = Number(session.payout_amount ?? 0);
@@ -238,8 +244,8 @@ router.get("/pending-claim", requireAuth, getPendingSettlements);
 
 router.get("/history", requireAuth, async (req: Request, res: Response) => {
   const walletAddress = req.walletAddress!;
-  const limit = Math.min(parseInt(String(req.query.limit ?? "20")), 100);
-  const offset = parseInt(String(req.query.offset ?? "0"));
+  const limit = parsePaginationParam(req.query.limit, 20, 1, 100);
+  const offset = parsePaginationParam(req.query.offset, 0, 0, Number.MAX_SAFE_INTEGER);
 
   const { data, error, count } = await supabase
     .from("game_sessions")
@@ -272,9 +278,15 @@ async function clearSettlement(req: Request, res: Response) {
     return;
   }
 
+  const normalizedTxHash = String(txHash).trim();
+  if (!isHex(normalizedTxHash, { strict: true }) || normalizedTxHash.length !== 66) {
+    res.status(400).json({ error: "Invalid txHash format." });
+    return;
+  }
+
   const { data: session } = await supabase
     .from("game_sessions")
-    .select("session_id, wallet_address, settlement_signature")
+    .select("session_id, wallet_address, status, settlement_signature, settlement_tx_hash")
     .eq("session_id", sessionId)
     .eq("wallet_address", walletAddress)
     .single();
@@ -284,9 +296,25 @@ async function clearSettlement(req: Request, res: Response) {
     return;
   }
 
+  const status = String(session.status ?? "");
+  if (status !== "CASHED_OUT" && status !== "CRASHED") {
+    res.status(409).json({ error: "Session belum siap untuk clear settlement." });
+    return;
+  }
+
+  if (!session.settlement_signature) {
+    res.status(409).json({ error: "Settlement signature belum tersedia." });
+    return;
+  }
+
+  if (session.settlement_tx_hash) {
+    res.json({ success: true });
+    return;
+  }
+
   await supabase
     .from("game_sessions")
-    .update({ settlement_tx_hash: txHash })
+    .update({ settlement_tx_hash: normalizedTxHash })
     .eq("session_id", sessionId);
 
   res.json({ success: true });

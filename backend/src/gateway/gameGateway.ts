@@ -40,13 +40,34 @@ import {
   SETTLEMENT_OUTCOME,
   generateOnchainSessionId,
   signSettlement,
+  type SignedSettlementResult,
   usdcToUint256,
 } from "../services/signatureService.js";
 
 let io: SocketServer;
+const SIGN_SETTLEMENT_TIMEOUT_MS = 10_000;
 const gatewayPublicClient = createPublicClient({
   transport: http(env.MONAD_RPC_URL),
 });
+
+function isValidUsdcStakeAmount(stake: number): boolean {
+  if (!Number.isFinite(stake)) return false;
+  if (stake < MIN_STAKE || stake > MAX_STAKE) return false;
+
+  const units = stake * 1_000_000;
+  return Math.abs(units - Math.round(units)) < 1e-6;
+}
+
+async function signSettlementWithTimeout(params: Parameters<typeof signSettlement>[0]) {
+  return await Promise.race<SignedSettlementResult>([
+    signSettlement(params),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`signSettlement timeout after ${SIGN_SETTLEMENT_TIMEOUT_MS}ms`));
+      }, SIGN_SETTLEMENT_TIMEOUT_MS);
+    }),
+  ]);
+}
 
 export function setupGameGateway(httpServer: HttpServer): SocketServer {
   io = new SocketServer(httpServer, {
@@ -99,9 +120,9 @@ export function setupGameGateway(httpServer: HttpServer): SocketServer {
 }
 
 async function handleGameStart(socket: Socket, walletAddress: string, stake: number): Promise<void> {
-  if (!stake || !isFinite(stake) || stake < MIN_STAKE || stake > MAX_STAKE) {
+  if (!isValidUsdcStakeAmount(stake)) {
     socket.emit("game:error", {
-      message: `Invalid stake. Must be between $${MIN_STAKE} and $${MAX_STAKE}.`,
+      message: `Invalid stake. Must be between $${MIN_STAKE} and $${MAX_STAKE} with max 6 decimals.`,
     });
     return;
   }
@@ -120,7 +141,7 @@ async function handleGameStart(socket: Socket, walletAddress: string, stake: num
   if (stale) {
     console.log(`🧹 Cleaning up stale session: ${stale.session_id}`);
     try {
-      const signed = await signSettlement({
+      const signed = await signSettlementWithTimeout({
         playerAddress: walletAddress,
         onchainSessionId: stale.onchain_session_id,
         stakeAmount: stale.stake_amount,
@@ -311,6 +332,17 @@ function handleGameMove(socket: Socket, walletAddress: string, direction: string
     return;
   }
 
+  const isKnownDirection =
+    direction === "forward" ||
+    direction === "backward" ||
+    direction === "left" ||
+    direction === "right";
+
+  if (!isKnownDirection) {
+    socket.emit("game:error", { message: "Invalid move direction." });
+    return;
+  }
+
   const now = Date.now();
 
   if (isMoveToFast(state.lastMoveTime, now)) {
@@ -395,7 +427,7 @@ async function handleGameCrash(
 
   let settlementResult = null;
   try {
-    settlementResult = await signSettlement({
+    settlementResult = await signSettlementWithTimeout({
       playerAddress: walletAddress,
       onchainSessionId: state.onchainSessionId,
       stakeAmount: state.stake,
@@ -473,7 +505,7 @@ async function handleGameCashout(socket: Socket, walletAddress: string): Promise
 
   let settlementResult;
   try {
-    settlementResult = await signSettlement({
+    settlementResult = await signSettlementWithTimeout({
       playerAddress: walletAddress,
       onchainSessionId: state.onchainSessionId,
       stakeAmount: state.stake,
@@ -620,7 +652,7 @@ async function handleAutoCashout(walletAddress: string): Promise<void> {
 
   let settlementResult;
   try {
-    settlementResult = await signSettlement({
+    settlementResult = await signSettlementWithTimeout({
       playerAddress: walletAddress,
       onchainSessionId: state.onchainSessionId,
       stakeAmount: state.stake,

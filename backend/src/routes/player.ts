@@ -4,6 +4,12 @@ import { supabase } from "../config/supabase.js";
 
 const router = Router();
 
+function parsePaginationParam(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+}
+
 /**
  * GET /api/player/stats
  * Get authenticated player's statistics.
@@ -38,8 +44,8 @@ router.get("/stats", requireAuth, async (req, res) => {
  */
 router.get("/transactions", requireAuth, async (req, res) => {
   const walletAddress = req.walletAddress!;
-  const limit = Math.min(parseInt(String(req.query.limit ?? "20")), 100);
-  const offset = parseInt(String(req.query.offset ?? "0"));
+  const limit = parsePaginationParam(req.query.limit, 20, 1, 100);
+  const offset = parsePaginationParam(req.query.offset, 0, 0, Number.MAX_SAFE_INTEGER);
 
   const { data, error, count } = await supabase
     .from("transactions")
