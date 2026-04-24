@@ -4,17 +4,15 @@ import { useAppKit } from "@reown/appkit/react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { SiweMessage } from "siwe";
-import {
-  useAccount,
-  useDisconnect,
-  useSignMessage,
-  useSwitchChain,
-} from "wagmi";
+import { useAccount, useDisconnect, useSignMessage, useSwitchChain } from "wagmi";
 import { backendFetch, backendPost } from "../../lib/backend/api";
 import { BACKEND_API_URL, hasBackendApiConfig } from "../../lib/backend/config";
 import { ensureAppKitInitialized } from "../../lib/web3/appKit";
 import { MONAD_CHAIN, hasMonadChainConfig } from "../../lib/web3/monad";
-import { readRawErrorMessage, toUserFacingWalletError } from "../../lib/errors";
+import {
+  readRawErrorMessage,
+  toUserFacingWalletError,
+} from "../../lib/errors";
 
 type WalletContextValue = {
   account: string;
@@ -174,9 +172,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
     }
 
     if (!hasMonadConfig) {
-      setError(
-        "Config Monad belum lengkap. Isi dulu variabel di frontend/.env.local.",
-      );
+      setError("Config Monad belum lengkap. Isi dulu variabel di frontend/.env.local.");
       return;
     }
 
@@ -189,9 +185,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
       const switchCode = readSwitchErrorCode(switchError);
       const shouldTryAddChain =
         switchCode === 4902 ||
-        readErrorMessage(switchError, "")
-          .toLowerCase()
-          .includes("unrecognized");
+        readErrorMessage(switchError, "").toLowerCase().includes("unrecognized");
 
       if (!shouldTryAddChain) {
         setError(
@@ -227,15 +221,9 @@ export function WalletProvider({ children }: WalletProviderProps) {
 
     setBackendAuthLoading(true);
     try {
-      const response = await backendFetch<{
-        authenticated: boolean;
-        address: string;
-      }>("/auth/me");
+      const response = await backendFetch<{ authenticated: boolean; address: string }>("/auth/me");
       const sessionAddress = response.address?.toLowerCase?.() || "";
-      if (
-        !sessionAddress ||
-        (normalizedAccount && sessionAddress !== normalizedAccount)
-      ) {
+      if (!sessionAddress || (normalizedAccount && sessionAddress !== normalizedAccount)) {
         setBackendAddress("");
         return false;
       }
@@ -253,9 +241,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
 
   async function authenticateBackend() {
     if (!hasBackendConfig) {
-      setBackendAuthError(
-        "Config backend belum lengkap. Isi NEXT_PUBLIC_BACKEND_API_URL dulu.",
-      );
+      setBackendAuthError("Config backend belum lengkap. Isi NEXT_PUBLIC_BACKEND_API_URL dulu.");
       return false;
     }
     if (!isConnected || !account) {
@@ -390,12 +376,10 @@ export function WalletProvider({ children }: WalletProviderProps) {
       isBackendAuthenticated,
       isConnecting,
       isMonadChain,
-    ],
+    ]
   );
 
-  return (
-    <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
-  );
+  return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }
 
 export function useWallet() {

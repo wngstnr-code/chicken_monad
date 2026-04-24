@@ -2256,54 +2256,6 @@ canvas.game {
   margin: 0;
 }
 
-.play-menu-volume {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border: 3px solid #2c3e50;
-  border-radius: 14px;
-  background: linear-gradient(180deg, #fff6df 0%, #f4e7c4 100%);
-  box-shadow: 4px 5px 0 rgba(0, 0, 0, 0.25);
-  padding: 10px 12px;
-}
-
-.play-menu-volume-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 10px;
-  letter-spacing: 0.8px;
-  color: #2c3e50;
-}
-
-.play-menu-volume-head strong {
-  color: #163863;
-}
-
-.play-menu-volume input[type="range"] {
-  width: 100%;
-  accent-color: #3e8ccd;
-  cursor: pointer;
-}
-
-.play-menu-volume-mute {
-  min-height: 34px;
-  border-radius: 10px;
-  border: 2px solid #2c3e50;
-  background: linear-gradient(180deg, #ffd59a 0%, #f0ad4e 100%);
-  color: #2f1f08;
-  font-family: inherit;
-  font-size: 10px;
-  letter-spacing: 1px;
-  cursor: pointer;
-  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.24);
-}
-
-.play-menu-volume-mute:active {
-  transform: translate(1px, 1px);
-  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.24);
-}
-
 
 
 .play-nav-deposit {

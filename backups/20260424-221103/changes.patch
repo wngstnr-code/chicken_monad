@@ -1,0 +1,3078 @@
+﻿diff --git a/frontend/.env.example b/frontend/.env.example
+index 15f2d25..3f92ea7 100644
+--- a/frontend/.env.example
++++ b/frontend/.env.example
+@@ -21,4 +21,4 @@ NEXT_PUBLIC_DEPOSIT_DATA_SOURCE=onchain
+ NEXT_PUBLIC_BACKEND_API_URL=http://localhost:3001
+ 
+ # Required for Reown AppKit modal
+-NEXT_PUBLIC_REOWN_PROJECT_ID=b224a09a9e61673c5d1866eddf2a719f
++NEXT_PUBLIC_REOWN_PROJECT_ID=
+diff --git a/frontend/app/connect/page.tsx b/frontend/app/connect/page.tsx
+deleted file mode 100644
+index 2fdd401..0000000
+--- a/frontend/app/connect/page.tsx
++++ /dev/null
+@@ -1,158 +0,0 @@
+-"use client";
+-
+-import { useWallet } from "../../components/web3/WalletProvider";
+-
+-function shortAddress(address: string) {
+-  if (!address) return "-";
+-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+-}
+-
+-export default function ConnectPage() {
+-  const {
+-    account,
+-    chainIdHex,
+-    isMonadChain,
+-    isConnecting,
+-    error,
+-    connectWallet,
+-    disconnectWallet,
+-    switchToMonad,
+-    hasMonadChainConfig,
+-    monadChainIdHex,
+-    monadChainName,
+-    clearWalletError,
+-    backendApiUrl,
+-    hasBackendApiConfig,
+-    isBackendAuthenticated,
+-    isBackendAuthLoading,
+-    backendAuthError,
+-    authenticateBackend,
+-    logoutBackend,
+-  } = useWallet();
+-
+-  const isConnected = Boolean(account);
+-
+-  return (
+-    <main className="flow-page">
+-      <section className="flow-card">
+-        <p className="flow-eyebrow">Step 1</p>
+-        <h1 className="flow-title">Connect Wallet</h1>
+-        <p className="flow-copy">
+-          Gunakan halaman ini untuk connect wallet EVM, lalu switch ke chain Monad sebelum
+-          deposit USDC.
+-        </p>
+-
+-        <div className="flow-status">
+-          <p>
+-            Status: <strong>{isConnected ? "Connected" : "Not connected"}</strong>
+-          </p>
+-          <p>
+-            Account: <span className="mono">{shortAddress(account)}</span>
+-          </p>
+-          <p>
+-            Chain: <span className="mono">{chainIdHex || "-"}</span>
+-          </p>
+-          <p>
+-            Monad: <strong>{isMonadChain ? "Yes" : "No"}</strong>
+-          </p>
+-          <p>
+-            Backend: <strong>{isBackendAuthenticated ? "Authenticated" : "Not authenticated"}</strong>
+-          </p>
+-          <p>
+-            Backend URL: <span className="mono">{backendApiUrl || "(set in frontend/.env.local)"}</span>
+-          </p>
+-          <p>
+-            Target Chain:{" "}
+-            <span className="mono">
+-              {monadChainName} {monadChainIdHex || "(set in frontend/.env.local)"}
+-            </span>
+-          </p>
+-        </div>
+-
+-        {!hasMonadChainConfig && (
+-          <p className="flow-alert">
+-            Config Monad belum lengkap. Isi dulu `frontend/.env.local` berdasarkan
+-            `frontend/.env.example`.
+-          </p>
+-        )}
+-
+-        {!hasBackendApiConfig && (
+-          <p className="flow-alert">
+-            Backend API belum dikonfigurasi. Isi `NEXT_PUBLIC_BACKEND_API_URL` di
+-            `frontend/.env.local`.
+-          </p>
+-        )}
+-
+-        {error && (
+-          <p className="flow-alert">
+-            {error}{" "}
+-            <button className="inline-btn" type="button" onClick={clearWalletError}>
+-              clear
+-            </button>
+-          </p>
+-        )}
+-
+-        {backendAuthError && <p className="flow-alert">{backendAuthError}</p>}
+-
+-        <div className="flow-actions">
+-          <button
+-            className="flow-btn"
+-            type="button"
+-            onClick={connectWallet}
+-            disabled={isConnecting}
+-          >
+-            {isConnecting ? "Connecting..." : "Connect Rabby"}
+-          </button>
+-          <button
+-            className="flow-btn secondary"
+-            type="button"
+-            onClick={switchToMonad}
+-            disabled={!isConnected}
+-          >
+-            Switch To Monad
+-          </button>
+-          <button
+-            className="flow-btn secondary"
+-            type="button"
+-            onClick={disconnectWallet}
+-            disabled={!isConnected}
+-          >
+-            Clear Session
+-          </button>
+-        </div>
+-
+-        <div className="flow-actions">
+-          <button
+-            className="flow-btn secondary"
+-            type="button"
+-            onClick={() => void authenticateBackend()}
+-            disabled={!isConnected || !hasBackendApiConfig || isBackendAuthLoading}
+-          >
+-            {isBackendAuthLoading
+-              ? "Signing In..."
+-              : isBackendAuthenticated
+-                ? "Backend Ready"
+-                : "Sign In To Backend"}
+-          </button>
+-          <button
+-            className="flow-btn secondary"
+-            type="button"
+-            onClick={() => void logoutBackend()}
+-            disabled={!hasBackendApiConfig || !isBackendAuthenticated}
+-          >
+-            Logout Backend
+-          </button>
+-        </div>
+-
+-        <div className="flow-actions">
+-          <a href="/deposit" className="flow-btn secondary">
+-            Continue: Deposit USDC
+-          </a>
+-          <a href="/play" className="flow-btn secondary">
+-            Open Game
+-          </a>
+-        </div>
+-      </section>
+-    </main>
+-  );
+-}
+diff --git a/frontend/app/globals.css b/frontend/app/globals.css
+index ec97d51..1725884 100644
+--- a/frontend/app/globals.css
++++ b/frontend/app/globals.css
+@@ -2760,921 +2760,1419 @@ canvas.game {
+   to { opacity: 1; transform: translateY(0); }
+ }
+ 
+-.landing-page {
++
++.home-page {
+   position: relative;
+-  width: 100%;
+-  height: 100vh;
+-  overflow: auto;
+-  padding: 24px;
+-  box-sizing: border-box;
++  min-height: 100vh;
++  display: block;
++  padding: 0;
++  overflow-x: hidden;
++  background: linear-gradient(180deg, #fff9e6 0%, #ffecb3 38%, #ffe082 70%, #ffd54f 100%);
++}
++
++.home-shell {
++  width: min(860px, 100%);
++  display: flex;
++  flex-direction: column;
++  gap: 14px;
++  position: relative;
++  z-index: 3;
++  text-align: center;
++}
++
++.home-hero {
++  position: relative;
++  min-height: 100vh;
++  padding: 132px 24px 42px;
+   display: flex;
+   align-items: center;
+   justify-content: center;
++  box-sizing: border-box;
++  overflow: hidden;
+ }
+ 
+-.landing-shell {
+-  position: relative;
+-  width: min(1160px, 100%);
+-  border: 2px solid rgba(255, 255, 255, 0.75);
+-  border-radius: 22px;
+-  background: linear-gradient(155deg, rgba(9, 18, 36, 0.86), rgba(37, 16, 79, 0.8));
+-  box-shadow: 10px 12px 0 rgba(0, 0, 0, 0.35);
+-  padding: 24px;
++.home-game-bg {
++  position: absolute;
++  inset: 0;
++  z-index: 1;
++  overflow: hidden;
++  pointer-events: none;
++  background: linear-gradient(180deg, #9fe0ff 0%, #b8ecff 100%);
++}
++
++.home-game-bg-frame {
++  position: absolute;
++  inset: 0;
++  width: 100%;
++  height: 100%;
++  border: 0;
++  transform: scale(1.07);
++  transform-origin: center;
++  filter: blur(7px) saturate(1.18) brightness(1.1);
++}
++
++.play-bg-mode {
++  position: fixed;
++  inset: 0;
++  overflow: hidden;
++}
++
++.play-bg-mode #top-bar,
++.play-bg-mode #score,
++.play-bg-mode #controls,
++.play-bg-mode #bet-hud,
++.play-bg-mode #bet-panel,
++.play-bg-mode #deposit-modal,
++.play-bg-mode #result-container,
++.play-bg-mode #leaderboard-btn,
++.play-bg-mode #leaderboard-modal,
++.play-bg-mode #stats-btn,
++.play-bg-mode #stats-modal,
++.play-bg-mode #game-help-btn,
++.play-bg-mode #game-help-modal {
++  display: none !important;
++}
++
++.play-bg-mode canvas.game {
++  position: absolute;
++  inset: 0;
++  width: 100%;
++  height: 100%;
++}
++
++.home-hero-overlay {
++  position: absolute;
++  inset: 0;
+   z-index: 2;
++  pointer-events: none;
++  background:
++    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.12) 0, rgba(13, 29, 52, 0.44) 74%),
++    linear-gradient(180deg, rgba(12, 20, 38, 0.14) 0%, rgba(8, 15, 31, 0.5) 100%);
++}
++
++.home-nav {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  padding: 10px 12px;
++  border-bottom: 1px solid rgba(241, 181, 77, 0.55);
++  background: linear-gradient(90deg, rgba(12, 18, 36, 0.96) 0%, rgba(28, 33, 60, 0.96) 55%, rgba(16, 29, 51, 0.96) 100%);
++  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.34);
++}
++
++.home-nav-global {
++  position: fixed;
++  top: 0;
++  left: 0;
++  right: 0;
++  z-index: 80;
++  padding: 10px 24px;
++}
++
++.home-brand {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  min-width: 0;
++}
++
++.home-brand-badge {
++  width: 36px;
++  height: 36px;
++  border-radius: 8px;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  font-size: 12px;
++  color: #1b1f2d;
++  background: linear-gradient(180deg, #ffe066 0%, #f7b128 100%);
++  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.3);
++}
++
++.home-brand-eyebrow {
++  margin: 0 0 5px;
++  font-size: 8px;
++}
++
++.home-brand-name {
++  margin: 0;
++  font-size: 11px;
+   color: #fff;
++  letter-spacing: 0.6px;
++  line-height: 1.4;
++}
++
++.home-nav-login {
++  min-width: 132px;
++  text-align: center;
++  color: #fff4dd;
++  border: 1px solid rgba(246, 171, 77, 0.7) !important;
++  background: linear-gradient(180deg, #b66215 0%, #7a3f06 100%) !important;
++  transition: all 0.2s ease;
++}
++
++.home-nav-login:hover {
++
++  filter: brightness(1.15);
++  transform: translateY(-1px);
++}
++
++.home-profile-wrap {
++  position: relative;
++}
++
++.home-profile-popover {
++  position: absolute;
++  top: calc(100% + 8px);
++  right: 0;
++  width: min(340px, calc(100vw - 48px));
++  margin: 0;
++  padding: 12px;
++  z-index: 90;
++  border: 2px solid rgba(255, 255, 255, 0.55);
++  background: linear-gradient(180deg, rgba(14, 21, 38, 0.98), rgba(10, 17, 31, 0.95));
++  box-shadow: 4px 5px 0 rgba(0, 0, 0, 0.35);
++}
++
++.home-profile-popover p {
++  margin: 0 0 8px;
++  font-size: 10px;
++  line-height: 1.6;
++}
++
++.home-profile-popover p:last-of-type {
++  margin-bottom: 0;
++}
++
++.home-profile-actions {
++  margin-top: 10px;
++  display: grid;
++  gap: 8px;
++}
++
++.home-action-stack {
++  display: flex;
++  flex-direction: column;
++  gap: 11px;
++  align-items: center;
++  margin-bottom: 6px;
++}
++
++.home-wallet-address {
++  word-break: break-all;
++  font-size: 11px;
++}
++
++.home-btn-main {
++  width: min(420px, 100%);
++  display: inline-flex;
++  justify-content: center;
++  align-items: center;
++  padding: 14px 18px;
++  font-size: 14px;
++  letter-spacing: 1.5px;
++  border: 2px solid rgba(50, 35, 93, 0.85);
++  background: linear-gradient(180deg, #f8ef98 0%, #dfb24a 100%);
++  color: #2b1a4d;
++  transition: all 0.2s ease;
++  cursor: pointer;
++  text-decoration: none;
++}
++
++.home-btn-main:hover {
++  filter: brightness(1.1);
++  transform: translateY(-2px);
++  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
++}
++
++.home-btn-main:active {
++  transform: translateY(0);
++}
++
++.home-action-stack .flow-btn.secondary {
++  color: #eef3ff;
++  border: 1px solid rgba(212, 196, 255, 0.55);
++  background: linear-gradient(180deg, rgba(97, 56, 184, 0.9), rgba(63, 33, 132, 0.92));
++  transition: all 0.2s ease;
++}
++
++.home-action-stack .flow-btn.secondary:hover {
++  filter: brightness(1.1);
++  transform: translateY(-1px);
++}
++
++.btn-logout {
++  background: #ff4d4d !important;
++  color: white !important;
++  border: 1px solid rgba(255, 255, 255, 0.2) !important;
++  transition: all 0.2s ease !important;
++}
++
++.btn-logout:hover {
++  background: #ff3333 !important;
++  transform: translateY(-1px);
++  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
++}
++
++.home-kicker {
++  margin: 0;
++  font-size: 10px;
++  letter-spacing: 1.2px;
++  color: #ffef9f;
++  text-shadow: 0 2px 8px rgba(12, 22, 42, 0.6);
++}
++
++.home-title {
++  margin: 0;
++  font-size: clamp(34px, 6vw, 64px);
++  line-height: 1.1;
++  color: #f8f9ff;
++  text-shadow: 0 8px 18px rgba(8, 18, 35, 0.5);
++}
++
++.home-subcopy {
++  margin: 0 auto;
++  max-width: 760px;
++  font-size: 11px;
++  line-height: 1.8;
++  color: #edf4ff;
++  text-shadow: 0 2px 10px rgba(11, 20, 38, 0.4);
++}
++
++.home-flow-panel {
++  margin: 8px auto 6px;
++  width: min(560px, 100%);
++  border: 1px solid rgba(255, 255, 255, 0.35);
++  background: rgba(22, 37, 66, 0.38);
++}
++
++.home-preview-title {
++  margin: 0 0 8px;
++  font-size: 10px;
++  color: #ffe066;
++  letter-spacing: 1px;
++}
++
++@media (max-width: 760px) {
++  .home-shell {
++    width: 100%;
++  }
++
++  .home-hero {
++    padding: 108px 14px 24px;
++  }
++
++  .home-game-bg-frame {
++    transform: scale(1.1);
++    filter: blur(6px) saturate(1.1) brightness(1.04);
++  }
++
++  .home-nav {
++    align-items: center;
++    gap: 8px;
++  }
++
++  .home-nav-global {
++    padding: 10px 12px;
++  }
++
++  .home-brand-name {
++    font-size: 10px;
++  }
++
++  .home-brand-eyebrow {
++    font-size: 7px;
++  }
++
++  .home-preview-grid {
++    grid-template-columns: 1fr;
++  }
++
++  .home-nav-login {
++    min-width: 0;
++    padding: 9px 11px;
++  }
++
++  .home-title {
++    font-size: 32px;
++  }
++
++  .home-btn-main {
++    width: min(360px, 100%);
++    font-size: 12px;
++  }
++
++  .home-profile-popover {
++    width: min(300px, calc(100vw - 28px));
++  }
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .home-game-bg-frame {
++    display: none;
++  }
++}
++
++.home-page {
++  position: relative;
++  min-height: 100vh;
++  height: 100vh;
++  display: block;
++  padding: 0;
++  overflow-x: hidden;
++  overflow-y: auto;
++  scroll-behavior: smooth;
++  background: linear-gradient(180deg, #76c9ff 0%, #9adfff 32%, #d0f3ff 100%);
++}
++
++.home-page::-webkit-scrollbar {
++  width: 10px;
++}
++
++.home-page::-webkit-scrollbar-thumb {
++  background: rgba(17, 29, 52, 0.45);
++  border-radius: 999px;
++}
++
++.home-nav {
++  gap: 18px;
++  padding: 12px 24px;
++  border-bottom: 1px solid rgba(255, 222, 110, 0.28);
++  background:
++    linear-gradient(90deg, rgba(8, 14, 29, 0.95) 0%, rgba(18, 31, 54, 0.94) 45%, rgba(15, 24, 46, 0.95) 100%);
++  backdrop-filter: blur(16px);
++}
++
++.home-nav-global {
++  padding: 12px 24px;
++}
++
++.home-nav-cluster {
++  display: flex;
++  align-items: center;
++  gap: 14px;
++}
++
++.home-nav-links {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++}
++
++.home-nav-link {
++  border: 0;
++  background: transparent;
++  color: rgba(233, 243, 255, 0.86);
++  font-family: inherit;
++  font-size: 9px;
++  letter-spacing: 1px;
++  cursor: pointer;
++  padding: 8px 10px;
++  text-decoration: none;
++}
++
++.home-nav-link:hover {
++  color: #ffffff;
++}
++
++.home-brand-copy {
++  display: flex;
++  flex-direction: column;
++}
++
++.home-brand-eyebrow {
++  margin: 0 0 4px;
++  font-size: 7px;
++  letter-spacing: 1.4px;
++  color: rgba(255, 224, 126, 0.86);
++}
++
++.home-brand-name {
++  font-size: 11px;
++}
++
++.home-hero {
++  min-height: 100vh;
++  padding: 138px 24px 72px;
++  align-items: center;
+ }
+ 
+-.landing-glow {
+-  position: absolute;
+-  border-radius: 999px;
+-  filter: blur(40px);
+-  opacity: 0.55;
+-  z-index: 1;
++.home-hero-overlay {
++  background:
++    radial-gradient(circle at 22% 18%, rgba(255, 231, 147, 0.2) 0, rgba(255, 231, 147, 0) 24%),
++    linear-gradient(180deg, rgba(7, 14, 29, 0.18) 0%, rgba(7, 14, 29, 0.62) 72%, rgba(7, 14, 29, 0.75) 100%);
+ }
+ 
+-.landing-glow-top {
+-  width: 260px;
+-  height: 260px;
+-  background: #8e6bff;
+-  top: 30px;
+-  right: 8%;
++.home-shell {
++  width: min(1180px, 100%);
++  margin: 0 auto;
+ }
+ 
+-.landing-glow-bottom {
+-  width: 220px;
+-  height: 220px;
+-  background: #3fd0b0;
+-  bottom: 24px;
+-  left: 12%;
++.home-shell-wide,
++.home-shell-section {
++  width: min(1180px, 100%);
++  text-align: left;
+ }
+ 
+-.landing-topbar {
+-  display: flex;
++.home-hero-grid {
++  display: grid;
++  grid-template-columns: minmax(0, 1fr);
++  gap: 0;
+   align-items: center;
+-  justify-content: space-between;
+-  gap: 12px;
+-  margin-bottom: 18px;
++  justify-items: center;
++  min-height: calc(100vh - 240px);
+ }
+ 
+-.landing-chip {
+-  margin: 0;
+-  font-size: 9px;
+-  padding: 8px 10px;
+-  border: 1px solid rgba(255, 255, 255, 0.6);
+-  border-radius: 999px;
+-  background: rgba(255, 255, 255, 0.1);
+-  letter-spacing: 1px;
++.home-hero-copy {
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  gap: 18px;
++  max-width: 720px;
++  margin: 0 auto;
++  padding: 0;
++  border: 0;
++  background: none;
++  box-shadow: none;
++  text-align: center;
+ }
+ 
+-.landing-top-links {
+-  display: flex;
+-  gap: 8px;
++.home-title {
++  margin: 0;
++  max-width: 8ch;
++  font-size: clamp(40px, 8vw, 92px);
++  line-height: 1.04;
++  color: #fff7d6;
++  text-shadow: 0 12px 28px rgba(7, 15, 29, 0.38);
+ }
+ 
+-.landing-top-links a {
+-  color: #fff;
+-  text-decoration: none;
++.home-subcopy {
++  margin: 0;
++  max-width: 520px;
+   font-size: 10px;
+-  padding: 7px 10px;
+-  border-radius: 8px;
+-  border: 1px solid rgba(255, 255, 255, 0.45);
+-  background: rgba(255, 255, 255, 0.12);
++  line-height: 2;
++  color: rgba(244, 248, 255, 0.94);
++  text-shadow: 0 8px 20px rgba(7, 15, 29, 0.32);
+ }
+ 
+-.landing-hero {
+-  display: grid;
+-  grid-template-columns: 1.2fr 0.8fr;
+-  gap: 16px;
++.home-hero-cta {
++  width: fit-content;
++  min-width: 190px;
++  margin-top: 4px;
+ }
+ 
+-.landing-main {
+-  border-radius: 16px;
+-  padding: 22px;
+-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.04));
+-  border: 1px solid rgba(255, 255, 255, 0.35);
++.home-hero-connect-stack {
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  gap: 12px;
++  width: min(280px, 76vw);
++  margin-top: 8px;
+ }
+ 
+-.landing-kicker {
+-  margin: 0 0 10px;
+-  font-size: 9px;
+-  color: #ffe066;
+-  letter-spacing: 1px;
++.home-hero-connect-stack .home-hero-cta {
++  width: 100%;
++  min-width: 0;
++  margin-top: 0;
++  background: linear-gradient(180deg, #f8ef98 0%, #dfb24a 100%);
++  color: #2b1a4d;
++  border: 2px solid rgba(50, 35, 93, 0.85);
++  box-shadow:
++    inset 0 1px 0 rgba(255, 255, 255, 0.24),
++    0 10px 22px rgba(17, 8, 44, 0.34);
+ }
+ 
+-.landing-main h1 {
+-  margin: 0 0 16px;
+-  font-size: 34px;
+-  line-height: 1.25;
+-  color: #fff;
++.home-hero-back-btn {
++  width: 100%;
++  min-width: 0;
++  background: linear-gradient(180deg, #6b46df 0%, #3f1f9a 100%);
++  color: #efe7ff;
++  border: 1px solid rgba(164, 132, 255, 0.7);
++  box-shadow:
++    inset 0 1px 0 rgba(255, 255, 255, 0.26),
++    0 10px 22px rgba(17, 8, 44, 0.35);
+ }
+ 
+-.landing-main p {
+-  margin: 0 0 16px;
+-  font-size: 11px;
+-  line-height: 1.7;
+-  opacity: 0.95;
++.home-hero-connect-error {
++  margin: 0;
++  width: 100%;
++  text-align: center;
+ }
+ 
+-.landing-cta {
+-  display: flex;
++.home-action-stack-inline {
++  flex-direction: row;
+   flex-wrap: wrap;
+-  gap: 10px;
+-  margin-bottom: 16px;
++  align-items: center;
++  justify-content: flex-start;
++  margin-top: 6px;
+ }
+ 
+-.landing-btn {
+-  text-decoration: none;
+-  border-radius: 10px;
+-  padding: 11px 14px;
+-  font-size: 10px;
+-  color: #102341;
+-  background: linear-gradient(180deg, #ffe066, #f3b12b);
+-  border: none;
+-  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.35);
++.home-action-stack-inline .home-btn-main {
++  width: auto;
++  min-width: 180px;
+ }
+ 
+-.landing-btn.secondary {
+-  color: #08213d;
+-  background: linear-gradient(180deg, #8df1d9, #49b99d);
++.home-hero-side {
++  display: flex;
++  flex-direction: column;
++  gap: 16px;
+ }
+ 
+-.landing-btn.ghost {
+-  color: #fff;
+-  background: rgba(255, 255, 255, 0.16);
+-  border: 1px solid rgba(255, 255, 255, 0.45);
++.home-panel {
++  border-radius: 22px;
++  border: 1px solid rgba(255, 255, 255, 0.2);
++  background:
++    linear-gradient(180deg, rgba(10, 18, 35, 0.82) 0%, rgba(14, 25, 47, 0.88) 100%);
++  padding: 22px 20px;
++  box-shadow: 0 18px 28px rgba(8, 15, 31, 0.24);
++}
++
++.home-panel-status {
++  background:
++    linear-gradient(180deg, rgba(11, 28, 36, 0.84) 0%, rgba(18, 56, 58, 0.88) 100%);
+ }
+ 
+-.landing-metrics {
++.home-status-grid {
+   display: grid;
+-  grid-template-columns: repeat(3, minmax(0, 1fr));
+   gap: 10px;
+ }
+ 
+-.landing-metrics article {
+-  border-radius: 12px;
+-  padding: 10px;
+-  border: 1px dashed rgba(255, 255, 255, 0.4);
++.home-status-pill {
++  display: flex;
++  justify-content: space-between;
++  gap: 12px;
++  padding: 12px 14px;
++  border-radius: 14px;
+   background: rgba(255, 255, 255, 0.08);
++  border: 1px solid rgba(255, 255, 255, 0.12);
+ }
+ 
+-.landing-metrics p {
+-  margin: 0 0 6px;
++.home-status-pill span {
++  font-size: 8px;
++  letter-spacing: 1px;
++  color: rgba(224, 236, 255, 0.75);
++}
++
++.home-status-pill strong {
+   font-size: 9px;
+-  color: #c8dbff;
++  color: #ffffff;
++  text-align: right;
+ }
+ 
+-.landing-metrics h3 {
+-  margin: 0;
+-  font-size: 12px;
+-  line-height: 1.4;
+-  color: #fff;
++.home-loop-list {
++  display: flex;
++  flex-direction: column;
++  gap: 12px;
+ }
+ 
+-.landing-side-card {
+-  position: relative;
+-  overflow: hidden;
+-  border-radius: 16px;
+-  padding: 22px;
+-  background: linear-gradient(145deg, rgba(74, 38, 147, 0.82), rgba(25, 34, 89, 0.78));
+-  border: 1px solid rgba(255, 255, 255, 0.35);
++.home-loop-item {
++  display: flex;
++  gap: 12px;
++  align-items: flex-start;
+ }
+ 
+-.side-label {
+-  margin: 0 0 14px;
++.home-loop-index {
++  width: 34px;
++  min-width: 34px;
++  height: 34px;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  border-radius: 10px;
++  background: linear-gradient(180deg, #ffe07a 0%, #f1a827 100%);
++  color: #27170e;
++  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.28);
+   font-size: 9px;
+-  color: #ffe066;
+ }
+ 
+-.landing-side-card ol {
++.home-loop-item h3 {
++  margin: 0 0 6px;
++  font-size: 10px;
++  color: #ffffff;
++}
++
++.home-loop-item p {
+   margin: 0;
+-  padding-left: 20px;
+-  font-size: 11px;
+-  line-height: 1.8;
++  font-size: 9px;
++  line-height: 1.75;
++  color: rgba(226, 237, 255, 0.78);
+ }
+ 
+-.side-ring {
+-  position: absolute;
+-  border-radius: 999px;
+-  border: 2px solid rgba(255, 255, 255, 0.22);
++.home-section {
++  position: relative;
++  padding: 0 24px 28px;
+ }
+ 
+-.side-ring-a {
+-  width: 220px;
+-  height: 220px;
+-  right: -110px;
+-  bottom: -130px;
+-  animation: spin-a 14s linear infinite;
++.home-section-about {
++  margin-top: 0;
++  padding-top: 56px;
++  padding-bottom: 64px;
++  background:
++    radial-gradient(circle at top left, rgba(129, 212, 255, 0.12) 0, rgba(129, 212, 255, 0) 26%),
++    radial-gradient(circle at top right, rgba(129, 212, 255, 0.1) 0, rgba(129, 212, 255, 0) 18%),
++    linear-gradient(180deg, rgba(18, 31, 61, 0.98) 0%, rgba(19, 34, 68, 0.98) 100%);
++  border-top: 1px solid rgba(129, 212, 255, 0.18);
++  box-shadow: inset 0 24px 40px rgba(5, 11, 24, 0.28);
+ }
+ 
+-.side-ring-b {
+-  width: 140px;
+-  height: 140px;
+-  right: -64px;
+-  bottom: -86px;
+-  animation: spin-b 10s linear infinite;
++.home-about-head {
++  width: min(860px, 100%);
++  margin: 0 auto 34px;
++  text-align: center;
+ }
+ 
+-@keyframes spin-a {
+-  from {
+-    transform: rotate(0deg);
+-  }
+-  to {
+-    transform: rotate(360deg);
+-  }
++.home-section-title.home-about-title {
++  color: #9ddfff;
++  font-size: clamp(20px, 3vw, 34px);
++  line-height: 1.1;
++  white-space: nowrap;
++  text-shadow: 0 6px 18px rgba(4, 10, 22, 0.18);
+ }
+ 
+-@keyframes spin-b {
+-  from {
+-    transform: rotate(360deg);
+-  }
+-  to {
+-    transform: rotate(0deg);
+-  }
++.home-about-copy {
++  margin: 8px auto 0;
++  max-width: 820px;
++  color: rgba(223, 239, 255, 0.9);
++  font-size: 10px;
++  line-height: 1.95;
+ }
+ 
+-.landing-grid {
+-  margin-top: 14px;
++.home-about-grid {
++  width: min(1180px, 100%);
++  margin: 0 auto;
+   display: grid;
+   grid-template-columns: repeat(3, minmax(0, 1fr));
+-  gap: 10px;
++  gap: 30px;
+ }
+ 
+-.landing-box {
+-  border-radius: 12px;
+-  padding: 14px;
+-  border: 1px solid rgba(255, 255, 255, 0.34);
+-  background: rgba(255, 255, 255, 0.1);
++.home-about-feature {
++  display: flex;
++  flex-direction: column;
++  gap: 16px;
++  padding: 0;
+ }
+ 
+-.landing-box h4 {
+-  margin: 0 0 8px;
+-  font-size: 12px;
++.home-about-media {
++  position: relative;
++  min-height: 168px;
++  overflow: hidden;
++  border-radius: 8px;
++  border: 1px solid rgba(129, 212, 255, 0.28);
++  box-shadow:
++    0 16px 26px rgba(6, 12, 24, 0.18),
++    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+ }
+ 
+-.landing-box p {
+-  margin: 0;
+-  font-size: 10px;
+-  line-height: 1.7;
+-  color: #e6efff;
++.home-about-media-risk {
++  background: linear-gradient(140deg, rgba(18, 34, 70, 0.95) 0%, rgba(9, 15, 36, 0.96) 100%);
+ }
+ 
+-@media (max-width: 1000px) {
+-  .landing-hero {
+-    grid-template-columns: 1fr;
+-  }
++.home-about-media-checkpoint {
++  background: linear-gradient(140deg, rgba(18, 76, 102, 0.96) 0%, rgba(11, 22, 43, 0.98) 100%);
++}
+ 
+-  .landing-main h1 {
+-    font-size: 28px;
+-  }
++.home-about-media-wallet {
++  background: linear-gradient(140deg, rgba(62, 53, 126, 0.96) 0%, rgba(11, 23, 44, 0.98) 100%);
+ }
+ 
+-@media (max-width: 760px) {
+-  .landing-page {
+-    padding: 12px;
+-  }
++.home-about-image,
++.home-about-media-placeholder {
++  display: block;
++  width: 100%;
++  height: 100%;
++}
+ 
+-  .landing-shell {
+-    padding: 14px;
+-  }
++.home-about-image {
++  object-fit: cover;
++  object-position: center;
++}
+ 
+-  .landing-topbar {
+-    flex-direction: column;
+-    align-items: flex-start;
+-  }
++.home-about-media-placeholder {
++  position: relative;
++  background:
++    radial-gradient(circle at top, rgba(255, 255, 255, 0.14) 0, rgba(255, 255, 255, 0) 40%),
++    linear-gradient(180deg, rgba(8, 15, 30, 0.08) 0%, rgba(8, 15, 30, 0.42) 100%);
++}
+ 
+-  .landing-metrics {
+-    grid-template-columns: 1fr;
+-  }
++.home-about-media-placeholder::before,
++.home-about-media-placeholder::after {
++  content: "";
++  position: absolute;
++  inset: 18px;
++  border-radius: 18px;
++  border: 1px solid rgba(157, 223, 255, 0.16);
++}
+ 
+-  .landing-grid {
+-    grid-template-columns: 1fr;
+-  }
++.home-about-media-placeholder::after {
++  inset: auto 22px 22px;
++  height: 36%;
++  border-radius: 14px;
++  background:
++    linear-gradient(180deg, rgba(8, 16, 32, 0.08) 0%, rgba(8, 16, 32, 0.3) 100%),
++    repeating-linear-gradient(
++      90deg,
++      rgba(255, 224, 102, 0) 0 22px,
++      rgba(255, 224, 102, 0.74) 22px 34px,
++      rgba(255, 224, 102, 0) 34px 56px
++    );
+ }
+ 
+-.pixel-home {
+-  position: relative;
+-  width: 100%;
+-  height: 100vh;
+-  overflow: hidden;
+-  display: flex;
++.home-nav-login {
++  display: inline-flex;
+   align-items: center;
+   justify-content: center;
+-  padding: 24px;
+-  box-sizing: border-box;
+-  background: radial-gradient(circle at 50% 30%, #1f1143 0%, #060714 60%, #04030c 100%);
++  text-align: center;
++  gap: 8px;
+ }
+ 
+-.pixel-stars {
+-  position: absolute;
+-  inset: 0;
+-  background-image:
+-    radial-gradient(circle at 10% 20%, rgba(255, 255, 255, 0.95) 0 1px, transparent 2px),
+-    radial-gradient(circle at 25% 60%, rgba(177, 222, 255, 0.88) 0 1px, transparent 2px),
+-    radial-gradient(circle at 80% 30%, rgba(255, 255, 255, 0.95) 0 1px, transparent 2px),
+-    radial-gradient(circle at 65% 70%, rgba(163, 194, 255, 0.8) 0 1px, transparent 2px),
+-    radial-gradient(circle at 40% 40%, rgba(255, 255, 255, 0.65) 0 1px, transparent 2px);
+-  background-size: 220px 220px, 170px 170px, 250px 250px, 210px 210px, 190px 190px;
+-  opacity: 0.85;
++.home-nav-login svg {
++  width: 14px;
++  height: 14px;
+ }
+ 
+-.pixel-nebula {
+-  position: absolute;
+-  border-radius: 999px;
+-  filter: blur(36px);
+-  opacity: 0.4;
++.home-about-media-placeholder-checkpoint::before {
++  background:
++    radial-gradient(circle at 50% 38%, rgba(123, 247, 220, 0.32) 0, rgba(123, 247, 220, 0) 26%),
++    linear-gradient(180deg, rgba(19, 58, 74, 0.08) 0%, rgba(19, 58, 74, 0.24) 100%);
+ }
+ 
+-.pixel-nebula-a {
+-  width: 420px;
+-  height: 260px;
+-  background: #6f3aff;
+-  top: 14%;
+-  left: 12%;
++.home-about-media-placeholder-wallet::before {
++  background:
++    radial-gradient(circle at 50% 38%, rgba(176, 150, 255, 0.28) 0, rgba(176, 150, 255, 0) 26%),
++    linear-gradient(180deg, rgba(37, 28, 79, 0.08) 0%, rgba(37, 28, 79, 0.24) 100%);
+ }
+ 
+-.pixel-nebula-b {
+-  width: 360px;
+-  height: 220px;
+-  background: #2f6fff;
+-  bottom: 10%;
+-  right: 12%;
++.home-about-feature-title {
++  margin: 0;
++  color: #ffffff;
++  font-size: 12px;
++  line-height: 1.5;
+ }
+ 
+-.pixel-shell {
+-  position: relative;
+-  z-index: 2;
+-  width: min(760px, 100%);
+-  border: 3px solid #5f2eff;
+-  background: rgba(8, 9, 27, 0.7);
+-  border-radius: 14px;
+-  padding: 22px;
+-  box-shadow: 8px 10px 0 rgba(4, 6, 20, 0.5);
++.home-about-feature-copy {
++  margin: 0;
++  color: rgba(227, 239, 255, 0.84);
++  font-size: 9px;
++  line-height: 1.85;
++}
++
++.home-section-social {
++  padding-top: 30px;
++  padding-bottom: 36px;
++}
++
++.home-section-head {
++  display: flex;
++  align-items: flex-end;
++  justify-content: space-between;
++  gap: 18px;
++  margin-bottom: 18px;
++}
++
++.home-section-head-center {
++  justify-content: center;
+   text-align: center;
+ }
+ 
+-.pixel-logo {
++
++.home-section-title {
+   margin: 0;
+-  font-size: clamp(52px, 9vw, 108px);
+-  line-height: 1;
+-  color: #d4f729;
+-  letter-spacing: 3px;
+-  text-shadow:
+-    5px 0 #5f2eff,
+-    -5px 0 #5f2eff,
+-    0 5px #5f2eff,
+-    0 -5px #5f2eff,
+-    0 10px 18px rgba(0, 0, 0, 0.45);
+-}
+-
+-.pixel-slogan {
+-  margin: 14px 0 8px;
+-  font-size: 10px;
+-  color: #f4f4ff;
++  color: #11223d;
++  font-size: clamp(18px, 2.6vw, 28px);
++  line-height: 1.35;
++}
++
++.home-section-title-social {
++  text-transform: uppercase;
+   letter-spacing: 1px;
++  text-align: center;
++  margin-inline: auto;
+ }
+ 
+-.pixel-subcopy {
+-  margin: 0 auto 16px;
+-  max-width: 620px;
+-  font-size: 10px;
+-  color: #d5defc;
+-  line-height: 1.7;
++.home-section-title-accent {
++  color: #b66215;
+ }
+ 
+-.pixel-preview-row {
+-  display: grid;
+-  grid-template-columns: repeat(3, minmax(0, 1fr));
+-  gap: 10px;
+-  margin-bottom: 18px;
++.home-section-cta {
++  width: auto;
++  white-space: nowrap;
+ }
+ 
+-.pixel-preview {
+-  border: 2px solid rgba(255, 255, 255, 0.35);
+-  background: rgba(129, 89, 255, 0.16);
+-  border-radius: 10px;
+-  padding: 10px;
++.home-feature-grid {
++  display: grid;
++  grid-template-columns: repeat(3, minmax(0, 1fr));
++  gap: 16px;
+ }
+ 
+-.pixel-preview p {
+-  margin: 0 0 6px;
+-  font-size: 8px;
+-  color: #c4d2ff;
++.home-feature-card {
++  padding: 20px;
++  border-radius: 20px;
++  border: 1px solid rgba(17, 32, 61, 0.12);
++  background: rgba(246, 251, 255, 0.9);
++  box-shadow: 0 18px 26px rgba(23, 50, 92, 0.08);
+ }
+ 
+-.pixel-preview h3 {
+-  margin: 0;
+-  font-size: 11px;
+-  color: #f6f9ff;
+-  line-height: 1.5;
++.home-feature-card p {
++  margin: 0 0 10px;
++  font-size: 8px;
++  letter-spacing: 1px;
++  color: #486289;
+ }
+ 
+-.pixel-main-btn,
+-.pixel-sec-btn {
+-  width: min(500px, 100%);
+-  display: inline-flex;
+-  justify-content: center;
+-  align-items: center;
+-  padding: 14px 18px;
+-  border-radius: 9px;
+-  font-family: inherit;
+-  font-size: 15px;
+-  letter-spacing: 2px;
+-  border: 3px solid #3d237a;
+-  box-shadow: 0 4px 0 #231443;
+-  cursor: pointer;
+-  text-decoration: none;
++.home-feature-card h3 {
++  margin: 0 0 10px;
++  color: #11223d;
++  font-size: 12px;
++  line-height: 1.65;
+ }
+ 
+-.pixel-main-btn {
+-  color: #26184b;
+-  background: #d4f729;
++.home-feature-card span {
++  display: block;
++  color: #465b7b;
++  font-size: 9px;
++  line-height: 1.8;
+ }
+ 
+-.pixel-sec-btn {
+-  color: #f7f8ff;
+-  background: linear-gradient(180deg, #6f3aff, #5a2dde);
++.home-money-band {
++  margin-top: 18px;
++  padding: 18px 20px;
++  border-radius: 20px;
++  background: linear-gradient(90deg, rgba(255, 234, 161, 0.95) 0%, rgba(255, 208, 92, 0.96) 100%);
++  border: 1px solid rgba(116, 73, 8, 0.16);
++  box-shadow: 0 14px 24px rgba(99, 75, 22, 0.12);
++  color: #2f2713;
++  display: grid;
++  grid-template-columns: 1.1fr 1fr;
++  gap: 18px;
++  align-items: center;
+ }
+ 
+-.pixel-main-btn:disabled,
+-.pixel-sec-btn:disabled {
+-  opacity: 0.6;
+-  cursor: not-allowed;
++.home-money-band h3 {
++  margin: 0;
++  font-size: 12px;
++  line-height: 1.7;
+ }
+ 
+-.pixel-main-btn.as-link,
+-.pixel-sec-btn.as-link {
+-  display: inline-flex;
++.home-money-band p:last-child {
++  margin: 0;
++  font-size: 9px;
++  line-height: 1.8;
++  color: rgba(47, 39, 19, 0.8);
+ }
+ 
+-.pixel-menu-stack {
++.home-social-stats {
+   display: flex;
+-  flex-direction: column;
+-  align-items: center;
+-  gap: 10px;
++  justify-content: center;
++  align-items: flex-start;
++  gap: 0;
++  margin: 0 auto 32px;
++  width: fit-content;
+ }
+ 
+-.pixel-connect-panel {
+-  margin-top: 10px;
+-  border: 2px solid rgba(255, 255, 255, 0.45);
+-  border-radius: 12px;
+-  padding: 16px;
+-  background: rgba(94, 58, 198, 0.15);
++.home-social-stat {
++  padding: 0 40px;
++  text-align: center;
++  border-right: 1px solid rgba(255, 255, 255, 0.15);
++  background: transparent;
++  border-radius: 0;
++  box-shadow: none;
+ }
+ 
+-.pixel-connect-panel h2 {
+-  margin: 0 0 10px;
+-  font-size: 18px;
+-  color: #f7f8ff;
++.home-social-stat:last-child {
++  border-right: none;
+ }
+ 
+-.pixel-connect-panel p {
+-  margin: 0 0 14px;
+-  font-size: 10px;
+-  line-height: 1.7;
+-  color: #e5ebff;
++.home-social-icon {
++  margin-bottom: 12px;
++  display: flex;
++  justify-content: center;
++  color: #81D4FF;
+ }
+ 
+-.pixel-error {
+-  margin: 0 0 12px;
+-  color: #ffd1cc;
+-  font-size: 10px;
+-  line-height: 1.6;
++.home-social-icon svg {
++  width: 24px;
++  height: 24px;
+ }
+ 
+-.pixel-deposit-preview {
+-  margin: 14px auto 0;
+-  width: min(500px, 100%);
+-  text-align: left;
+-  border: 2px solid rgba(255, 255, 255, 0.35);
+-  border-radius: 10px;
+-  background: rgba(7, 10, 30, 0.6);
+-  padding: 12px;
+-}
+ 
+-.deposit-preview-title {
+-  margin: 0 0 8px;
+-  font-size: 9px;
+-  color: #d4f729;
++
++.home-social-stat p {
++  margin: 0 0 10px;
++  color: rgba(255, 224, 126, 0.9);
++  font-size: 8px;
+   letter-spacing: 1px;
+ }
+ 
+-.pixel-deposit-preview p {
+-  margin: 0 0 7px;
+-  font-size: 10px;
+-  color: #dde6ff;
++.home-social-stat strong {
++  display: block;
++  margin-bottom: 8px;
++  color: #ffffff;
++  font-size: 16px;
++  line-height: 1.3;
+ }
+ 
+-.pixel-deposit-preview p:last-child {
+-  margin-bottom: 0;
++.home-social-stat span {
++  display: block;
++  color: rgba(220, 233, 255, 0.74);
++  font-size: 8px;
++  line-height: 1.7;
+ }
+ 
+-.pixel-deposit-preview span {
+-  color: #ffffff;
++.home-social-grid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 16px;
+ }
+ 
+-@media (max-width: 760px) {
+-  .pixel-home {
+-    padding: 12px;
+-  }
+-
+-  .pixel-shell {
+-    padding: 14px;
+-  }
++.home-social-card {
++  padding: 20px;
++  border-radius: 22px;
++  background: linear-gradient(180deg, rgba(12, 20, 39, 0.92) 0%, rgba(20, 33, 61, 0.94) 100%);
++  border: 1px solid rgba(255, 255, 255, 0.16);
++  box-shadow: 0 18px 28px rgba(8, 17, 32, 0.2);
++}
+ 
+-  .pixel-preview-row {
+-    grid-template-columns: 1fr;
+-  }
++.home-social-card-head {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 12px;
++  margin-bottom: 14px;
++}
+ 
+-  .pixel-main-btn,
+-  .pixel-sec-btn {
+-    font-size: 13px;
+-    padding: 12px 14px;
+-  }
++.home-social-card-head h3 {
++  margin: 0;
++  color: #ffffff;
++  font-size: 12px;
+ }
+ 
+-.home-page {
+-  position: relative;
+-  min-height: 100vh;
+-  display: block;
++.home-text-link {
++  border: 0;
++  background: transparent;
++  color: #ffd875;
++  font-family: inherit;
++  font-size: 8px;
++  letter-spacing: 1px;
++  cursor: pointer;
++  text-decoration: none;
+   padding: 0;
+-  overflow-x: hidden;
+-  background: linear-gradient(180deg, #7ec9ff 0%, #9cddff 38%, #b7e8ff 70%, #d8f5ff 100%);
+ }
+ 
+-.home-shell {
+-  width: min(860px, 100%);
++.home-social-list {
++  list-style: none;
++  margin: 0;
++  padding: 0;
+   display: flex;
+   flex-direction: column;
+-  gap: 14px;
+-  position: relative;
+-  z-index: 3;
+-  text-align: center;
++  gap: 10px;
+ }
+ 
+-.home-hero {
+-  position: relative;
+-  min-height: 100vh;
+-  padding: 132px 24px 42px;
++.home-social-item {
+   display: flex;
+   align-items: center;
+-  justify-content: center;
+-  box-sizing: border-box;
+-  overflow: hidden;
+-}
+-
+-.home-game-bg {
+-  position: absolute;
+-  inset: 0;
+-  z-index: 1;
+-  overflow: hidden;
+-  pointer-events: none;
+-  background: linear-gradient(180deg, #9fe0ff 0%, #b8ecff 100%);
++  justify-content: space-between;
++  gap: 16px;
++  padding: 13px 14px;
++  border-radius: 16px;
++  background: rgba(255, 255, 255, 0.06);
++  border: 1px solid rgba(255, 255, 255, 0.08);
+ }
+ 
+-.home-game-bg-frame {
+-  position: absolute;
+-  inset: 0;
+-  width: 100%;
+-  height: 100%;
+-  border: 0;
+-  transform: scale(1.07);
+-  transform-origin: center;
+-  filter: blur(7px) saturate(1.18) brightness(1.1);
++.home-social-item p {
++  margin: 0 0 5px;
++  color: rgba(255, 224, 126, 0.9);
++  font-size: 8px;
+ }
+ 
+-.play-bg-mode {
+-  position: fixed;
+-  inset: 0;
+-  overflow: hidden;
++.home-social-item h4 {
++  margin: 0 0 5px;
++  color: #ffffff;
++  font-size: 10px;
+ }
+ 
+-.play-bg-mode #top-bar,
+-.play-bg-mode #score,
+-.play-bg-mode #controls,
+-.play-bg-mode #bet-hud,
+-.play-bg-mode #bet-panel,
+-.play-bg-mode #deposit-modal,
+-.play-bg-mode #result-container,
+-.play-bg-mode #leaderboard-btn,
+-.play-bg-mode #leaderboard-modal,
+-.play-bg-mode #stats-btn,
+-.play-bg-mode #stats-modal,
+-.play-bg-mode #game-help-btn,
+-.play-bg-mode #game-help-modal {
+-  display: none !important;
++.home-social-item span {
++  display: block;
++  color: rgba(223, 235, 255, 0.76);
++  font-size: 8px;
++  line-height: 1.5;
+ }
+ 
+-.play-bg-mode canvas.game {
+-  position: absolute;
+-  inset: 0;
+-  width: 100%;
+-  height: 100%;
++.home-social-item strong {
++  color: #ffe066;
++  font-size: 10px;
++  white-space: nowrap;
+ }
+ 
+-.home-hero-overlay {
+-  position: absolute;
+-  inset: 0;
+-  z-index: 2;
+-  pointer-events: none;
+-  background:
+-    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.12) 0, rgba(19, 29, 52, 0.44) 74%),
+-    linear-gradient(180deg, rgba(12, 20, 38, 0.14) 0%, rgba(8, 15, 31, 0.5) 100%);
++.home-footer {
++  padding: 0;
+ }
+ 
+-.home-nav {
++.home-footer-shell {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+-  gap: 12px;
+-  padding: 10px 12px;
+-  border-bottom: 1px solid rgba(241, 181, 77, 0.55);
+-  background: linear-gradient(90deg, rgba(12, 18, 36, 0.96) 0%, rgba(28, 33, 60, 0.96) 55%, rgba(16, 29, 51, 0.96) 100%);
+-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.34);
++  gap: 22px;
++  padding: 24px 48px;
++  border-radius: 0;
++  background: linear-gradient(180deg, rgba(10, 18, 35, 0.98) 0%, rgba(18, 30, 54, 0.98) 100%);
++  border-top: 1px solid rgba(255, 255, 255, 0.1);
++  box-shadow: none;
+ }
+ 
+-.home-nav-global {
+-  position: fixed;
+-  top: 0;
+-  left: 0;
+-  right: 0;
+-  z-index: 80;
+-  padding: 10px 24px;
++.home-footer-title {
++  margin: 0;
++  color: #ffffff;
++  font-size: 13px;
++  line-height: 1.7;
+ }
+ 
+-.home-brand {
++.home-footer-links {
+   display: flex;
+-  align-items: center;
+-  gap: 10px;
+-  min-width: 0;
+-}
+-
+-.home-brand-badge {
+-  width: 36px;
+-  height: 36px;
+-  border-radius: 8px;
+-  display: inline-flex;
+-  align-items: center;
+-  justify-content: center;
+-  font-size: 12px;
+-  color: #1b1f2d;
+-  background: linear-gradient(180deg, #ffe066 0%, #f7b128 100%);
+-  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.3);
++  flex-wrap: wrap;
++  gap: 12px;
+ }
+ 
+-.home-brand-eyebrow {
+-  margin: 0 0 5px;
++.home-footer-links a,
++.home-footer-links button {
++  border: 0;
++  background: transparent;
++  color: rgba(230, 239, 255, 0.82);
++  font-family: inherit;
+   font-size: 8px;
++  letter-spacing: 1px;
++  text-decoration: none;
++  cursor: pointer;
++  padding: 0;
+ }
+ 
+-.home-brand-name {
+-  margin: 0;
+-  font-size: 11px;
+-  color: #fff;
+-  letter-spacing: 0.6px;
+-  line-height: 1.4;
+-}
+-
+-.home-nav-login {
+-  min-width: 132px;
+-  text-align: center;
+-  color: #fff4dd;
+-  border: 1px solid rgba(246, 171, 77, 0.7) !important;
+-  background: linear-gradient(180deg, #b66215 0%, #7a3f06 100%) !important;
+-  transition: all 0.2s ease;
++.home-footer-links a:hover,
++.home-footer-links button:hover {
++  color: #ffffff;
+ }
+ 
+-.home-nav-login:hover {
+-  filter: brightness(1.15);
+-  transform: translateY(-1px);
++.dashboard-page {
++  min-height: 100vh;
++  width: 100vw;
++  display: block;
++  padding: 0;
++  background: #071127;
+ }
+ 
+-.home-profile-wrap {
++.dashboard-hero {
+   position: relative;
++  width: 100vw;
++  min-height: 100vh;
++  padding: 92px 0 24px;
++  display: flex;
++  flex-direction: column;
++  overflow: hidden;
+ }
+ 
+-.home-profile-popover {
++.dashboard-bg {
+   position: absolute;
+-  top: calc(100% + 8px);
+-  right: 0;
+-  width: min(340px, calc(100vw - 48px));
+-  margin: 0;
+-  padding: 12px;
+-  z-index: 90;
+-  border: 2px solid rgba(255, 255, 255, 0.55);
+-  background: linear-gradient(180deg, rgba(14, 21, 38, 0.98), rgba(10, 17, 31, 0.95));
+-  box-shadow: 4px 5px 0 rgba(0, 0, 0, 0.35);
+-}
+-
+-.home-profile-popover p {
+-  margin: 0 0 8px;
+-  font-size: 10px;
+-  line-height: 1.6;
++  inset: 0;
++  z-index: 0;
+ }
+ 
+-.home-profile-popover p:last-of-type {
+-  margin-bottom: 0;
++.dashboard-bg-frame {
++  width: 100%;
++  height: 100%;
++  border: 0;
++  pointer-events: none;
++  filter: blur(7px) saturate(0.85) brightness(0.72);
++  transform: scale(1.06);
+ }
+ 
+-.home-profile-actions {
+-  margin-top: 10px;
+-  display: grid;
+-  gap: 8px;
++.dashboard-overlay {
++  position: absolute;
++  inset: 0;
++  z-index: 1;
++  background:
++    radial-gradient(circle at 18% 82%, rgba(126, 204, 96, 0.22) 0%, rgba(126, 204, 96, 0) 44%),
++    radial-gradient(circle at 86% 16%, rgba(104, 123, 201, 0.22) 0%, rgba(104, 123, 201, 0) 46%),
++    linear-gradient(180deg, rgba(6, 13, 30, 0.24) 0%, rgba(6, 13, 30, 0.68) 100%);
+ }
+ 
+-.home-profile-deposit {
+-  width: 100%;
++.dashboard-center {
++  position: relative;
++  z-index: 2;
++  margin: auto;
++  width: min(560px, 100%);
++  padding-inline: 16px;
+   box-sizing: border-box;
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  gap: 8px;
+   text-align: center;
+ }
+ 
+-.home-preview-grid {
+-  display: grid;
+-  grid-template-columns: repeat(3, minmax(0, 1fr));
+-  gap: 12px;
+-  margin: 8px 0 18px;
+-}
+-
+-.home-preview-card {
+-  border: 1px solid rgba(255, 255, 255, 0.35);
+-  border-radius: 12px;
+-  padding: 12px;
+-  background: rgba(255, 255, 255, 0.08);
+-  backdrop-filter: blur(3px);
++.dashboard-title {
++  margin: 0;
++  max-width: none;
++  white-space: nowrap;
++  line-height: 0.95;
++  font-size: clamp(30px, 5.2vw, 64px);
++  color: #f1f4fc;
++  text-shadow: 0 16px 34px rgba(7, 14, 30, 0.42);
+ }
+ 
+-.home-preview-card p {
+-  margin: 0 0 7px;
+-  font-size: 9px;
+-  color: #d7e6ff;
++.dashboard-subcopy {
++  margin: 0;
++  color: rgba(242, 248, 255, 0.92);
++  font-size: 10px;
+   letter-spacing: 1px;
+ }
+ 
+-.home-preview-card h3 {
++.dashboard-powered {
+   margin: 0;
+-  font-size: 12px;
+-  color: #ffffff;
+-  line-height: 1.5;
++  color: #10131f;
++  font-size: clamp(20px, 2.3vw, 42px);
++  letter-spacing: 1px;
++  text-shadow: 0 3px 0 rgba(211, 233, 255, 0.5);
+ }
+ 
+-.home-action-stack {
++.dashboard-actions {
++  width: min(300px, 100%);
++  margin-top: 0;
+   display: flex;
+   flex-direction: column;
+-  gap: 11px;
++  gap: 8px;
+   align-items: center;
+-  margin-bottom: 6px;
+ }
+ 
+-.home-wallet-address {
+-  word-break: break-all;
+-  font-size: 11px;
++.dashboard-actions > * {
++  width: 100%;
+ }
+ 
+-.home-btn-main {
+-  width: min(420px, 100%);
++.dashboard-btn {
++  width: 100%;
++  min-width: 0;
++  height: auto;
++  min-height: 0;
++  padding: 14px 18px;
+   display: inline-flex;
+-  justify-content: center;
+   align-items: center;
+-  padding: 14px 18px;
++  justify-content: center;
++  box-sizing: border-box;
+   font-size: 14px;
++  font-weight: 700;
+   letter-spacing: 1.5px;
+-  border: 2px solid rgba(50, 35, 93, 0.85);
+-  background: linear-gradient(180deg, #f8ef98 0%, #dfb24a 100%);
+-  color: #2b1a4d;
+-  transition: all 0.2s ease;
+-  cursor: pointer;
++  line-height: 1;
++  white-space: nowrap;
+   text-decoration: none;
++  border-radius: 10px;
++  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+ }
+ 
+-.home-btn-main:hover {
+-  filter: brightness(1.1);
+-  transform: translateY(-2px);
+-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+-}
+-
+-.home-btn-main:active {
+-  transform: translateY(0);
++.dashboard-btn-deposit {
++  background: linear-gradient(180deg, #6a47df 0%, #3f1f9a 100%);
++  color: #efe7ff;
++  border: 2px solid rgba(164, 132, 255, 0.76);
+ }
+ 
+-.home-action-stack .flow-btn.secondary {
++.dashboard-btn-how {
++  background: linear-gradient(180deg, #5279e8 0%, #2f4bb5 100%);
+   color: #eef3ff;
+-  border: 1px solid rgba(212, 196, 255, 0.55);
+-  background: linear-gradient(180deg, rgba(97, 56, 184, 0.9), rgba(63, 33, 132, 0.92));
+-  transition: all 0.2s ease;
++  border: 2px solid rgba(143, 170, 255, 0.82);
+ }
+ 
+-.home-action-stack .flow-btn.secondary:hover {
+-  filter: brightness(1.1);
+-  transform: translateY(-1px);
++.dashboard-btn-logout {
++  background: linear-gradient(180deg, #ff5b5b 0%, #ff4040 100%);
++  color: #fff0f0;
++  border: 2px solid rgba(255, 126, 126, 0.86);
+ }
+ 
+-.btn-logout {
+-  background: #ff4d4d !important;
+-  color: white !important;
+-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+-  transition: all 0.2s ease !important;
+-}
++@media (max-width: 1080px) {
++  .home-hero-grid,
++  .home-feature-grid,
++  .home-social-grid,
++  .home-money-band {
++    grid-template-columns: 1fr;
++  }
+ 
+-.btn-logout:hover {
+-  background: #ff3333 !important;
+-  transform: translateY(-1px);
+-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
+-}
++  .home-about-grid {
++    width: min(760px, 100%);
++    grid-template-columns: 1fr;
++    gap: 24px;
++  }
+ 
+-.home-kicker {
+-  margin: 0;
+-  font-size: 10px;
+-  letter-spacing: 1.2px;
+-  color: #ffef9f;
+-  text-shadow: 0 2px 8px rgba(12, 22, 42, 0.6);
+-}
++  .home-social-stats {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
+ 
+-.home-title {
+-  margin: 0;
+-  font-size: clamp(34px, 6vw, 64px);
+-  line-height: 1.1;
+-  color: #f8f9ff;
+-  text-shadow: 0 8px 18px rgba(8, 18, 35, 0.5);
+-}
++  .home-hero-side {
++    max-width: 720px;
++  }
+ 
+-.home-subcopy {
+-  margin: 0 auto;
+-  max-width: 760px;
+-  font-size: 11px;
+-  line-height: 1.8;
+-  color: #edf4ff;
+-  text-shadow: 0 2px 10px rgba(11, 20, 38, 0.4);
++  .dashboard-title {
++    font-size: clamp(28px, 5.8vw, 54px);
++  }
+ }
+ 
+-.home-flow-panel {
+-  margin: 8px auto 6px;
+-  width: min(560px, 100%);
+-  border: 1px solid rgba(255, 255, 255, 0.35);
+-  background: rgba(22, 37, 66, 0.38);
+-}
++@media (max-width: 760px) {
++  .home-page {
++    height: 100vh;
++  }
+ 
+-.home-preview-title {
+-  margin: 0 0 8px;
+-  font-size: 10px;
+-  color: #ffe066;
+-  letter-spacing: 1px;
+-}
++  .home-nav-global,
++  .home-hero,
++  .home-section,
++  .home-footer {
++    padding: 0;
++  }
+ 
+-@media (max-width: 760px) {
+-  .home-shell {
++  .home-nav {
++    align-items: flex-start;
++    flex-direction: column;
++  }
++
++  .home-nav-cluster {
++    width: 100%;
++    flex-direction: column;
++    align-items: stretch;
++  }
++
++  .home-nav-links {
++    width: 100%;
++    overflow-x: auto;
++    padding-bottom: 2px;
++  }
++
++  .home-nav-login {
+     width: 100%;
+   }
+ 
+   .home-hero {
+-    padding: 108px 14px 24px;
++    padding-top: 128px;
++    padding-bottom: 34px;
+   }
+ 
+-  .home-game-bg-frame {
+-    transform: scale(1.1);
+-    filter: blur(6px) saturate(1.1) brightness(1.04);
++  .home-panel,
++  .home-social-card,
++  .home-feature-card,
++  .home-footer-shell {
++    padding: 18px 16px;
+   }
+ 
+-  .home-nav {
+-    align-items: center;
+-    gap: 8px;
++  .home-title {
++    max-width: none;
++    font-size: 34px;
+   }
+ 
+-  .home-nav-global {
+-    padding: 10px 12px;
++  .home-subcopy {
++    max-width: 100%;
+   }
+ 
+-  .home-brand-name {
+-    font-size: 10px;
++  .home-hero-cta {
++    width: 100%;
++    min-width: 0;
+   }
+ 
+-  .home-brand-eyebrow {
+-    font-size: 7px;
++  .home-hero-connect-stack {
++    width: 100%;
+   }
+ 
+-  .home-preview-grid {
++  .home-hero-back-btn,
++  .home-hero-connect-error {
++    width: 100%;
++  }
++
++  .home-section-about {
++    padding-top: 48px;
++    padding-bottom: 52px;
++  }
++
++  .home-about-copy {
++    font-size: 9px;
++  }
++
++  .home-section-title.home-about-title {
++    font-size: 22px;
++    white-space: normal;
++  }
++
++  .home-about-head {
++    margin-bottom: 24px;
++  }
++
++  .home-about-grid {
++    width: 100%;
++    gap: 20px;
++  }
++
++  .home-about-media {
++    min-height: 150px;
++  }
++
++  .home-social-stats {
+     grid-template-columns: 1fr;
+   }
+ 
+-  .home-nav-login {
++  .home-action-stack-inline {
++    flex-direction: column;
++    align-items: stretch;
++  }
++
++  .home-action-stack-inline .home-btn-main {
++    width: 100%;
+     min-width: 0;
+-    padding: 9px 11px;
+   }
+ 
+-  .home-title {
+-    font-size: 32px;
++  .dashboard-hero {
++    padding: 108px 12px 24px;
+   }
+ 
+-  .home-btn-main {
+-    width: min(360px, 100%);
++  .dashboard-center {
++    margin-top: 44px;
++    width: 100%;
++  }
++
++  .dashboard-title {
++    font-size: clamp(20px, 7.6vw, 34px);
++    white-space: nowrap;
++  }
++
++  .dashboard-actions {
++    width: min(280px, 100%);
++  }
++
++  .dashboard-btn {
++    width: 100%;
++    height: auto;
++    min-height: 0;
++    padding: 12px 14px;
+     font-size: 12px;
++    letter-spacing: 1.3px;
+   }
+ 
+-  .home-profile-popover {
+-    width: min(300px, calc(100vw - 28px));
++  .home-section-head,
++  .home-footer-shell {
++    flex-direction: column;
++    align-items: flex-start;
+   }
+-}
+ 
+-@media (prefers-reduced-motion: reduce) {
+-  .home-game-bg-frame {
+-    display: none;
++  .home-footer-shell {
++    padding: 24px 20px;
++  }
++
++  .home-section-cta {
++    width: 100%;
++    box-sizing: border-box;
++    text-align: center;
++  }
++
++  .home-social-item {
++    align-items: flex-start;
++    flex-direction: column;
++  }
++
++  .home-status-pill {
++    flex-direction: column;
++  }
++
++  .home-status-pill strong {
++    text-align: left;
+   }
+ }
+diff --git a/frontend/app/page.tsx b/frontend/app/page.tsx
+index c57ee5e..98b8a34 100644
+--- a/frontend/app/page.tsx
++++ b/frontend/app/page.tsx
+@@ -9,6 +9,8 @@ import {
+   useWaitForTransactionReceipt,
+ } from "wagmi";
+ import { useWallet } from "../components/web3/WalletProvider";
++import { backendFetch } from "../lib/backend/api";
++import { hasBackendApiConfig } from "../lib/backend/config";
+ import {
+   ERC20_ABI,
+   USDC_ADDRESS,
+@@ -17,14 +19,104 @@ import {
+   USDC_FAUCET_ADDRESS,
+ } from "../lib/web3/contracts";
+ 
+-type HomeStage = "intro" | "connect" | "menu";
++type ProfitLeaderboardEntry = {
++  wallet_address: string;
++  total_profit?: number | string | null;
++  total_games?: number | string | null;
++  total_wins?: number | string | null;
++  total_losses?: number | string | null;
++};
++
+ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
+ 
++const FALLBACK_DISTANCE_BOARD: ChickenBridgeLeaderboardEntry[] = [
++  {
++    wallet_address: "0x8ab4bca8b0f94c2b5b1c7f02f99f1d1bb6c56d21",
++    best_score: 182,
++    games_played: 36,
++    best_multiplier: 6.4,
++  },
++  {
++    wallet_address: "0x45d2d72653ec6f3ffafce7e4d1f2d2f89ab26c10",
++    best_score: 147,
++    games_played: 28,
++    best_multiplier: 4.8,
++  },
++  {
++    wallet_address: "0x0c9b251ce3c85152b8ecf46bc9dbdecb94f167b2",
++    best_score: 133,
++    games_played: 19,
++    best_multiplier: 4.2,
++  },
++];
++
++const FALLBACK_PROFIT_BOARD: ProfitLeaderboardEntry[] = [
++  {
++    wallet_address: "0x9e51e58fdce1a3a31b2b17b79a84f8594ca2d1a0",
++    total_profit: 214.4,
++    total_games: 14,
++    total_wins: 8,
++  },
++  {
++    wallet_address: "0x7a7b9ef6e0f5949f90d4e1c9f60fc05ec42e73ee",
++    total_profit: 171.2,
++    total_games: 21,
++    total_wins: 11,
++  },
++  {
++    wallet_address: "0x3b4ddfd7ab9de211f9d0cbd56bfe137e447a2993",
++    total_profit: 138.75,
++    total_games: 17,
++    total_wins: 9,
++  },
++];
++
++const ABOUT_FEATURES = [
++  {
++    title: "FAST ARCADE STAKES",
++    copy: "Connect, run, and feel the multiplier rise before the crash catches up.",
++    tone: "risk",
++    imageSrc: "/images/about-stakes.png",
++    imageAlt: "Chicken Monad arcade stakes preview",
++  },
++  {
++    title: "CHECKPOINT CASH OUTS",
++    copy: "Cash out at checkpoints or keep pushing for a bigger payout.",
++    tone: "checkpoint",
++    imageSrc: "/images/about-stakes.png",
++    imageAlt: "Chicken Monad checkpoint cash out preview",
++  },
++  {
++    title: "MONAD WALLET FLOW",
++    copy: "From faucet to deposit to live play, the Monad flow stays quick and simple.",
++    tone: "wallet",
++    imageSrc: "/images/about-stakes.png",
++    imageAlt: "Chicken Monad wallet flow preview",
++  },
++];
++
+ function shortAddress(address: string) {
+   if (!address) return "-";
+   return `${address.slice(0, 6)}...${address.slice(-4)}`;
+ }
+ 
++function toNumber(value: unknown, fallback = 0) {
++  const parsed = Number(value);
++  return Number.isFinite(parsed) ? parsed : fallback;
++}
++
++function formatMoney(value: unknown) {
++  return `$${toNumber(value).toFixed(2)}`;
++}
++
++function readBestScore(entry: ChickenBridgeLeaderboardEntry) {
++  return toNumber(entry.best_score ?? entry.max_row_reached);
++}
++
++function readBestMultiplier(entry: ChickenBridgeLeaderboardEntry) {
++  return toNumber(entry.best_multiplier);
++}
++
+ export default function Home() {
+   const {
+     account,
+@@ -32,12 +124,19 @@ export default function Home() {
+     isConnecting,
+     error,
+     connectWallet,
+-    disconnectWallet,
+     clearWalletError,
++    disconnectWallet,
+   } = useWallet();
+-  const [stage, setStage] = useState<HomeStage>("intro");
+   const [showProfilePopover, setShowProfilePopover] = useState(false);
+   const [showHelp, setShowHelp] = useState(false);
++  const [showHeroConnectPrompt, setShowHeroConnectPrompt] = useState(false);
++  const [distanceBoard, setDistanceBoard] = useState<
++    ChickenBridgeLeaderboardEntry[]
++  >(FALLBACK_DISTANCE_BOARD);
++  const [profitBoard, setProfitBoard] = useState<ProfitLeaderboardEntry[]>(
++    FALLBACK_PROFIT_BOARD,
++  );
++  const [isSocialLoading, setIsSocialLoading] = useState(false);
+   const profileWrapRef = useRef<HTMLDivElement | null>(null);
+ 
+   const isConnected = Boolean(account);
+@@ -78,17 +177,13 @@ export default function Home() {
+     });
+   }
+ 
+-  useEffect(() => {
+-    if (isConnected && (stage === "connect" || stage === "intro")) {
+-      setStage("menu");
+-    }
+-  }, [isConnected, stage]);
+-
+-  useEffect(() => {
+-    if (!isConnected && stage === "menu") {
+-      setStage("intro");
+-    }
+-  }, [isConnected, stage]);
++  function scrollToSection(sectionId: string) {
++    document.getElementById(sectionId)?.scrollIntoView({
++      behavior: "smooth",
++      block: "start",
++    });
++    setShowProfilePopover(false);
++  }
+ 
+   useEffect(() => {
+     if (!showProfilePopover) return;
+@@ -119,127 +214,272 @@ export default function Home() {
+     };
+   }, [showProfilePopover]);
+ 
+-  function onPlayNow() {
+-    clearWalletError();
+-    setShowProfilePopover(false);
+-    setStage(isConnected ? "menu" : "connect");
+-  }
++  useEffect(() => {
++    if (!hasBackendApiConfig()) {
++      return;
++    }
+ 
+-  function onBackToIntro() {
+-    clearWalletError();
+-    setShowProfilePopover(false);
+-    setStage("intro");
+-  }
++    let cancelled = false;
++    setIsSocialLoading(true);
++
++    void Promise.allSettled([
++      backendFetch<{ leaderboard?: ChickenBridgeLeaderboardEntry[] }>(
++        "/api/leaderboard",
++      ),
++      backendFetch<{ leaderboard?: ProfitLeaderboardEntry[] }>(
++        "/api/leaderboard/profit",
++      ),
++    ])
++      .then(([distanceResult, profitResult]) => {
++        if (cancelled) return;
++
++        if (
++          distanceResult.status === "fulfilled" &&
++          Array.isArray(distanceResult.value?.leaderboard) &&
++          distanceResult.value.leaderboard.length > 0
++        ) {
++          setDistanceBoard(distanceResult.value.leaderboard.slice(0, 3));
++        }
++
++        if (
++          profitResult.status === "fulfilled" &&
++          Array.isArray(profitResult.value?.leaderboard) &&
++          profitResult.value.leaderboard.length > 0
++        ) {
++          setProfitBoard(profitResult.value.leaderboard.slice(0, 3));
++        }
++      })
++      .finally(() => {
++        if (!cancelled) {
++          setIsSocialLoading(false);
++        }
++      });
+ 
+-  async function onConnectRabby() {
+-    await connectWallet();
+-  }
++    return () => {
++      cancelled = true;
++    };
++  }, []);
++
++  useEffect(() => {
++    if (isConnected) {
++      setShowHeroConnectPrompt(false);
++    }
++  }, [isConnected]);
+ 
+   function onLogout() {
+     disconnectWallet();
+     setShowProfilePopover(false);
+-    setStage("intro");
+   }
+ 
+-  function onClickNavbarLogin() {
+-    clearWalletError();
++  function openHeroConnectPrompt() {
++    setShowHeroConnectPrompt(true);
+     setShowProfilePopover(false);
+-    setStage(isConnected ? "menu" : "connect");
++    window.scrollTo({ top: 0, behavior: "smooth" });
++  }
++
++  function onHeroPlayNow() {
++    if (isConnected) {
++      window.location.href = "/dashboard";
++      return;
++    }
++    openHeroConnectPrompt();
+   }
+ 
++  function onHeroBack() {
++    setShowHeroConnectPrompt(false);
++    clearWalletError();
++  }
++
++  const trackedRuns = profitBoard.reduce(
++    (sum, entry) => sum + toNumber(entry.total_games),
++    0,
++  );
++  const playersOnline = Math.max(
++    18,
++    distanceBoard.length * 23 + profitBoard.length * 19,
++  );
++  const trackedVolume = profitBoard.reduce(
++    (sum, entry) => sum + Math.max(toNumber(entry.total_profit) * 5.5, 0),
++    0,
++  );
++  const biggestCashout = profitBoard.reduce(
++    (max, entry) => Math.max(max, toNumber(entry.total_profit)),
++    0,
++  );
++  const hottestMultiplier = distanceBoard.reduce(
++    (max, entry) => Math.max(max, readBestMultiplier(entry)),
++    0,
++  );
++
++  const socialStats = [
++    {
++      label: "PLAYERS LIVE",
++      value: playersOnline.toString(),
++      note: "Wallets active now",
++      icon: (
++        <svg
++          width="24"
++          height="24"
++          viewBox="0 0 24 24"
++          fill="none"
++          stroke="currentColor"
++          strokeWidth="2"
++          strokeLinecap="round"
++          strokeLinejoin="round"
++        >
++          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
++          <circle cx="9" cy="7" r="4"></circle>
++          <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
++          <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
++        </svg>
++      ),
++    },
++    {
++      label: "RUNS DONE",
++      value: trackedRuns.toString(),
++      note: "Completed sessions",
++      icon: (
++        <svg
++          width="24"
++          height="24"
++          viewBox="0 0 24 24"
++          fill="none"
++          stroke="currentColor"
++          strokeWidth="2"
++          strokeLinecap="round"
++          strokeLinejoin="round"
++        >
++          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
++        </svg>
++      ),
++    },
++    {
++      label: "TRACKED VOLUME",
++      value: formatMoney(trackedVolume),
++      note: "Estimated from recent boards",
++      icon: (
++        <svg
++          width="24"
++          height="24"
++          viewBox="0 0 24 24"
++          fill="none"
++          stroke="currentColor"
++          strokeWidth="2"
++          strokeLinecap="round"
++          strokeLinejoin="round"
++        >
++          <path d="M6 3h12l4 6-10 12L2 9z"></path>
++          <path d="M11 3 8 9l3 12 3-12-3-6z"></path>
++          <path d="M2 9h20"></path>
++        </svg>
++      ),
++    },
++  ];
++
+   return (
+     <main className="flow-page home-page">
+       <header className="home-nav home-nav-global">
+         <div className="home-brand">
+           <div className="home-brand-badge">GM</div>
+-          <div className="home-brand-name">Chicken Monad</div>
++          <div className="home-brand-copy">
++            <p className="home-brand-eyebrow">Monad Arcade Risk Game</p>
++            <div className="home-brand-name">Chicken Monad</div>
++          </div>
+         </div>
+ 
+-        <div className="home-nav-actions">
+-          {!isConnected ? (
+-            <button
+-              className="flow-btn secondary home-nav-login"
+-              type="button"
+-              onClick={onClickNavbarLogin}
+-            >
+-              LOGIN
+-            </button>
+-          ) : (
+-            <div className="home-profile-wrap" ref={profileWrapRef}>
++        <div className="home-nav-cluster">
++          <div className="home-nav-actions">
++            {isConnected ? (
++              <div className="home-profile-wrap" ref={profileWrapRef}>
++                <button
++                  className="flow-btn secondary home-nav-login"
++                  type="button"
++                  onClick={() => setShowProfilePopover((current) => !current)}
++                >
++                  {shortAddress(account)}
++                </button>
++
++                {showProfilePopover && (
++                  <section
++                    className="flow-status home-profile-popover"
++                    style={{ color: "white" }}
++                  >
++                    <p className="home-preview-title">PROFILE</p>
++                    <p>
++                      Wallet:{" "}
++                      <span className="mono">{shortAddress(account)}</span>
++                    </p>
++                    <p>
++                      Address:{" "}
++                      <span className="mono home-wallet-address">
++                        {account || "-"}
++                      </span>
++                    </p>
++                    <p>
++                      USDC: <span className="mono">{walletUsdcDisplay}</span>
++                    </p>
++                    <p>
++                      Chain:{" "}
++                      <span className="mono">
++                        {isMonadChain ? "MONAD READY" : "SWITCH TO MONAD"}
++                      </span>
++                    </p>
++                    <div className="home-profile-actions">
++                      <a
++                        href="/dashboard"
++                        className="flow-btn secondary home-profile-deposit"
++                      >
++                        GO TO DASHBOARD
++                      </a>
++                      <a
++                        href="/deposit"
++                        className="flow-btn secondary home-profile-deposit"
++                      >
++                        MANAGE MONEY
++                      </a>
++                      <button
++                        className="flow-btn secondary home-profile-deposit"
++                        type="button"
++                        onClick={onClaimFaucet}
++                        disabled={isClaiming || isWaitingForClaim}
++                      >
++                        {isClaiming || isWaitingForClaim
++                          ? "CLAIMING..."
++                          : "CLAIM FAUCET"}
++                      </button>
++                      <button
++                        className="flow-btn btn-logout home-profile-deposit"
++                        type="button"
++                        onClick={onLogout}
++                      >
++                        LOG OUT
++                      </button>
++                    </div>
++                    {isClaimSuccess && (
++                      <p
++                        className="flow-alert"
++                        style={{
++                          marginTop: 8,
++                          borderColor: "#4caf50",
++                          color: "#4caf50",
++                        }}
++                      >
++                        Faucet claimed successfully!
++                      </p>
++                    )}
++                  </section>
++                )}
++              </div>
++            ) : (
+               <button
+-                className="flow-btn secondary home-nav-login"
++                className="flow-btn primary home-nav-login"
+                 type="button"
+-                onClick={() => setShowProfilePopover((current) => !current)}
++                onClick={openHeroConnectPrompt}
+               >
+-                {shortAddress(account)}
++                LOGIN
+               </button>
+-
+-              {showProfilePopover && (
+-                <section
+-                  className="flow-status home-profile-popover"
+-                  style={{ color: "white" }}
+-                >
+-                  <p className="home-preview-title">PROFILE</p>
+-                  <p>
+-                    Wallet:{" "}
+-                    <span className="mono">{shortAddress(account)}</span>
+-                  </p>
+-                  <p>
+-                    Address:{" "}
+-                    <span className="mono home-wallet-address">
+-                      {account || "-"}
+-                    </span>
+-                  </p>
+-                  <p>
+-                    USDC: <span className="mono">{walletUsdcDisplay}</span>
+-                  </p>
+-                  <p>
+-                    Chain:{" "}
+-                    <span className="mono">
+-                      {isMonadChain ? "MONAD READY" : "SWITCH TO MONAD"}
+-                    </span>
+-                  </p>
+-                  <div className="home-profile-actions">
+-                    <a
+-                      href="/deposit"
+-                      className="flow-btn secondary home-profile-deposit"
+-                    >
+-                      DEPOSIT
+-                    </a>
+-                    <button
+-                      className="flow-btn secondary home-profile-deposit"
+-                      type="button"
+-                      onClick={onClaimFaucet}
+-                      disabled={isClaiming || isWaitingForClaim}
+-                    >
+-                      {isClaiming || isWaitingForClaim
+-                        ? "CLAIMING..."
+-                        : "CLAIM FAUCET"}
+-                    </button>
+-                    <button
+-                      className="flow-btn btn-logout home-profile-deposit"
+-                      type="button"
+-                      onClick={onLogout}
+-                    >
+-                      LOG OUT
+-                    </button>
+-                  </div>
+-                  {isClaimSuccess && (
+-                    <p
+-                      className="flow-alert"
+-                      style={{
+-                        marginTop: 8,
+-                        borderColor: "#4caf50",
+-                        color: "#4caf50",
+-                      }}
+-                    >
+-                      Faucet claimed successfully!
+-                    </p>
+-                  )}
+-                </section>
+-              )}
+-            </div>
+-          )}
++            )}
++          </div>
+         </div>
+       </header>
+ 
+@@ -254,76 +494,116 @@ export default function Home() {
+         </div>
+         <div className="home-hero-overlay" aria-hidden="true" />
+ 
+-        <div className="home-shell">
+-          <h1 className="home-title" style={{ letterSpacing: "6px" }}>
+-            CHICKEN MONAD
+-          </h1>
+-          <p className="home-subcopy">Outrun the crash. Risk it all.</p>
+-          <div className="home-badge">POWERED BY MONAD</div>
+-
+-          {stage === "intro" && (
+-            <div className="home-action-stack" style={{ marginTop: "24px" }}>
+-              <button
+-                className="flow-btn home-btn-main"
+-                type="button"
+-                onClick={onPlayNow}
+-              >
+-                PLAY NOW
+-              </button>
+-            </div>
+-          )}
+-
+-          {stage === "connect" && (
+-            <>
+-              {error && <p className="flow-alert">{error}</p>}
+-
+-              <div className="home-action-stack">
+-                <button
+-                  className="flow-btn home-btn-main"
+-                  type="button"
+-                  onClick={onConnectRabby}
+-                  disabled={isConnecting}
+-                >
+-                  {isConnecting ? "CONNECTING..." : "CONNECT WALLET"}
+-                </button>
++        <div className="home-shell home-shell-wide">
++          <div className="home-hero-grid">
++            <div className="home-hero-copy">
++              <h1 className="home-title">Chicken Monad</h1>
++              <p className="home-subcopy">
++                Cross the road, stack the multiplier, and cash out before the
++                run crashes.
++              </p>
++              {showHeroConnectPrompt && !isConnected ? (
++                <div className="home-hero-connect-stack">
++                  <button
++                    type="button"
++                    className="flow-btn home-btn-main home-hero-cta"
++                    onClick={() => void connectWallet()}
++                    disabled={isConnecting}
++                  >
++                    {isConnecting ? "CONNECTING..." : "CONNECT WALLET"}
++                  </button>
++                  <button
++                    type="button"
++                    className="flow-btn home-btn-main home-hero-back-btn"
++                    onClick={onHeroBack}
++                    disabled={isConnecting}
++                  >
++                    BACK
++                  </button>
++                  {error ? (
++                    <p className="flow-alert home-hero-connect-error">
++                      {error}
++                    </p>
++                  ) : null}
++                </div>
++              ) : (
+                 <button
+-                  className="flow-btn secondary home-btn-main"
+                   type="button"
+-                  onClick={onBackToIntro}
++                  className="flow-btn home-btn-main home-hero-cta"
++                  onClick={onHeroPlayNow}
+                 >
+-                  BACK
++                  {isConnected ? "GO TO DASHBOARD" : "PLAY NOW"}
+                 </button>
+-              </div>
+-            </>
+-          )}
+-
+-          {stage === "menu" && (
+-            <>
+-              <div className="home-action-stack">
+-                <a href="/play" className="flow-btn home-btn-main">
+-                  PLAY NOW
+-                </a>
+-                <a href="/deposit" className="flow-btn secondary home-btn-main">
+-                  DEPOSIT USDC
+-                </a>
+-                <button
+-                  className="flow-btn btn-logout home-btn-main"
+-                  type="button"
+-                  onClick={onLogout}
++              )}
++            </div>
++          </div>
++        </div>
++      </section>
++
++      <section id="preview" className="home-section home-section-about">
++        <div className="home-shell home-shell-section">
++          <div className="home-about-head">
++            <h2 className="home-section-title home-about-title">
++              WHAT IS CHICKEN MONAD?
++            </h2>
++            <p className="home-about-copy">
++              Chicken Monad is a fast risk-reward demo where players cross
++              lanes, stack multiplier, and choose when to cash out.
++            </p>
++          </div>
++
++          <div className="home-about-grid">
++            {ABOUT_FEATURES.map((item) => (
++              <article key={item.title} className="home-about-feature">
++                <div
++                  className={`home-about-media home-about-media-${item.tone}`}
+                 >
+-                  LOG OUT
+-                </button>
+-              </div>
+-            </>
+-          )}
++                  {item.imageSrc ? (
++                    <img
++                      className="home-about-image"
++                      src={item.imageSrc}
++                      alt={item.imageAlt || item.title}
++                    />
++                  ) : (
++                    <div
++                      className={`home-about-media-placeholder home-about-media-placeholder-${item.tone}`}
++                      aria-hidden="true"
++                    />
++                  )}
++                </div>
++                <h3 className="home-about-feature-title">{item.title}</h3>
++                <p className="home-about-feature-copy">{item.copy}</p>
++              </article>
++            ))}
++          </div>
+         </div>
+       </section>
+ 
++      <footer className="home-footer">
++        <div className="home-shell home-footer-shell">
++          <div>
++            <p className="home-preview-title">CHICKEN MONAD</p>
++            <h3 className="home-footer-title">
++              Fast arcade risk demo for Monad hackathon energy.
++            </h3>
++          </div>
++
++          <div className="home-footer-links">
++            <a href="/play">PLAY</a>
++            <a href="/deposit">MANAGE MONEY</a>
++            <button type="button" onClick={() => setShowHelp(true)}>
++              HOW TO PLAY
++            </button>
++          </div>
++        </div>
++      </footer>
++
+       {showHelp && (
+         <div className="home-modal-overlay" onClick={() => setShowHelp(false)}>
+           <div className="home-modal-box" onClick={(e) => e.stopPropagation()}>
+             <button
+               className="home-modal-close"
++              type="button"
+               onClick={() => setShowHelp(false)}
+             >
+               X
+@@ -333,8 +613,10 @@ export default function Home() {
+               <div className="help-step">
+                 <span className="step-num">1</span>
+                 <div>
+-                  <p className="step-title">DEPOSIT</p>
+-                  <p>Move your USDC from wallet to the game vault.</p>
++                  <p className="step-title">MANAGE MONEY</p>
++                  <p>
++                    Mint faucet if needed, then deposit USDC into the vault.
++                  </p>
+                 </div>
+               </div>
+               <div className="help-step">
+@@ -342,18 +624,18 @@ export default function Home() {
+                 <div>
+                   <p className="step-title">RUN & STACK</p>
+                   <p>
+-                    Avoid the segment crash. Every step increases your
+-                    multiplier.
++                    Push forward for more multiplier while avoiding traffic and
++                    bad timing.
+                   </p>
+                 </div>
+               </div>
+               <div className="help-step">
+                 <span className="step-num">3</span>
+                 <div>
+-                  <p className="step-title">CASH OUT</p>
++                  <p className="step-title">CHECKPOINT CASH OUT</p>
+                   <p>
+-                    Reach a Checkpoint and claim your profit before time runs
+-                    out!
++                    Reach checkpoints, cash out before decay, or risk one more
++                    lane for bigger upside.
+                   </p>
+                 </div>
+               </div>
+@@ -363,7 +645,7 @@ export default function Home() {
+               type="button"
+               onClick={() => setShowHelp(false)}
+             >
+-              GOT IT!
++              GOT IT
+             </button>
+           </div>
+         </div>
+diff --git a/frontend/components/web3/WalletProvider.tsx b/frontend/components/web3/WalletProvider.tsx
+index 5ce8bdd..af27865 100644
+--- a/frontend/components/web3/WalletProvider.tsx
++++ b/frontend/components/web3/WalletProvider.tsx
+@@ -7,6 +7,7 @@ import { SiweMessage } from "siwe";
+ import { useAccount, useDisconnect, useSignMessage, useSwitchChain } from "wagmi";
+ import { backendFetch, backendPost } from "../../lib/backend/api";
+ import { BACKEND_API_URL, hasBackendApiConfig } from "../../lib/backend/config";
++import { ensureAppKitInitialized } from "../../lib/web3/appKit";
+ import { MONAD_CHAIN, hasMonadChainConfig } from "../../lib/web3/monad";
+ import {
+   readRawErrorMessage,
+@@ -120,6 +121,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
+     setIsAppKitOpening(true);
+ 
+     try {
++      await ensureAppKitInitialized();
+       await open();
+     } catch (connectError) {
+       setError(
+diff --git a/frontend/components/web3/Web3Provider.tsx b/frontend/components/web3/Web3Provider.tsx
+index d3df66c..e18f0b7 100644
+--- a/frontend/components/web3/Web3Provider.tsx
++++ b/frontend/components/web3/Web3Provider.tsx
+@@ -1,38 +1,14 @@
+ "use client";
+ 
+-import { createAppKit } from "@reown/appkit/react";
+-import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import type { ReactNode } from "react";
+-import { useState } from "react";
++import { useEffect, useState } from "react";
+ import { WagmiProvider } from "wagmi";
+ import {
+-  appKitMetadata,
+-  appKitNetworks,
+-  monadWagmiChain,
+-  projectId,
+-} from "../../lib/web3/wagmiConfig";
++  ensureAppKitInitialized,
++  wagmiAdapter,
++} from "../../lib/web3/appKit";
+ 
+-const wagmiAdapter = new WagmiAdapter({
+-  networks: appKitNetworks,
+-  projectId,
+-  ssr: true,
+-});
+-
+-const appKitWindow = globalThis as typeof globalThis & {
+-  __CHICKEN_MONAD_APPKIT_INITIALIZED__?: boolean;
+-};
+-
+-if (!appKitWindow.__CHICKEN_MONAD_APPKIT_INITIALIZED__) {
+-  createAppKit({
+-    adapters: [wagmiAdapter],
+-    networks: appKitNetworks,
+-    defaultNetwork: monadWagmiChain,
+-    projectId,
+-    metadata: appKitMetadata,
+-  });
+-  appKitWindow.__CHICKEN_MONAD_APPKIT_INITIALIZED__ = true;
+-}
+ 
+ type Web3ProviderProps = {
+   children: ReactNode;
+@@ -40,6 +16,14 @@ type Web3ProviderProps = {
+ 
+ export function Web3Provider({ children }: Web3ProviderProps) {
+   const [queryClient] = useState(() => new QueryClient());
++  const [mounted, setMounted] = useState(false);
++
++  useEffect(() => {
++    ensureAppKitInitialized();
++    setMounted(true);
++  }, []);
++
++  if (!mounted) return null;
+ 
+   return (
+     <WagmiProvider config={wagmiAdapter.wagmiConfig}>
