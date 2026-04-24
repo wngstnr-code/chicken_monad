@@ -10,6 +10,10 @@ import {
   signSettlement,
   usdcToUint256,
 } from "../services/signatureService.js";
+import {
+  getSettlementRelayerAddress,
+  submitSettlementOnchain,
+} from "../services/settlementExecutor.js";
 
 const router = Router();
 const settlementPublicClient = createPublicClient({
@@ -18,6 +22,63 @@ const settlementPublicClient = createPublicClient({
 const GAME_SETTLEMENT_READ_ABI = parseAbi([
   "function getSession(bytes32 sessionId) view returns (address player, uint256 stakeAmount, uint64 startedAt, bool active, bool settled)",
 ]);
+
+function toSettlementErrorMessage(error: unknown) {
+  const raw = String(
+    (error as { shortMessage?: string; message?: string })?.shortMessage ||
+      (error as { message?: string })?.message ||
+      "unknown error",
+  );
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes("insufficient funds") ||
+    lower.includes("funds for gas") ||
+    lower.includes("signer had insufficient balance")
+  ) {
+    return `Failed to submit settlement onchain: backend relayer kehabisan MON untuk gas (relayer: ${getSettlementRelayerAddress()}).`;
+  }
+  if (lower.includes("enotfound") || lower.includes("fetch failed")) {
+    return "Failed to submit settlement onchain: backend gagal mengakses RPC Monad.";
+  }
+  if (lower.includes("invalidsigner")) {
+    return "Failed to submit settlement onchain: signer backend tidak cocok dengan signer di contract.";
+  }
+  if (lower.includes("sessionalreadysettled")) {
+    return "Settlement session ini sudah settled onchain.";
+  }
+  if (lower.includes("sessionnotactive")) {
+    return "Settlement session ini sudah tidak aktif onchain.";
+  }
+  if (lower.includes("sessionnotfound")) {
+    return "Session onchain tidak ditemukan untuk settlement ini.";
+  }
+  if (lower.includes("resolutionexpired")) {
+    return "Settlement signature sudah expired.";
+  }
+  if (lower.includes("insufficienttreasury")) {
+    return "Treasury vault tidak cukup untuk payout settlement ini.";
+  }
+  if (lower.includes("sessionnotactive") || lower.includes("session already settled")) {
+    return "Settlement session ini sudah tidak aktif onchain.";
+  }
+
+  return `Failed to submit settlement onchain: ${raw}`;
+}
+
+function isAlreadySettledLikeError(error: unknown) {
+  const raw = String(
+    (error as { shortMessage?: string; message?: string })?.shortMessage ||
+      (error as { message?: string })?.message ||
+      "",
+  ).toLowerCase();
+
+  return (
+    raw.includes("sessionalreadysettled") ||
+    raw.includes("sessionnotactive") ||
+    raw.includes("sessionnotfound")
+  );
+}
 
 function parsePaginationParam(value: unknown, fallback: number, min: number, max: number) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
@@ -41,6 +102,46 @@ function buildResolutionFromSession(walletAddress: string, session: Record<strin
     outcome: status === "CRASHED" ? 2 : 1,
     deadline: String(session.settlement_deadline ?? "0"),
   };
+}
+
+async function submitSettlementForSession(params: {
+  walletAddress: string;
+  session: Record<string, unknown>;
+}) {
+  const { walletAddress, session } = params;
+  const sessionId = String(session.session_id ?? "");
+  const existingTxHash = String(session.settlement_tx_hash ?? "").trim();
+  if (existingTxHash) {
+    return existingTxHash;
+  }
+
+  const ensuredSettlement = await ensureSettlementSignature(walletAddress, session);
+  if (!ensuredSettlement?.signature || !ensuredSettlement.deadline) {
+    throw new Error("Settlement signature belum tersedia.");
+  }
+
+  const normalizedSession = {
+    ...session,
+    settlement_signature: ensuredSettlement.signature,
+    settlement_deadline: ensuredSettlement.deadline,
+  };
+  const resolution = buildResolutionFromSession(walletAddress, normalizedSession);
+  const txHash = await submitSettlementOnchain({
+    resolution,
+    signature: ensuredSettlement.signature,
+  });
+
+  const { error } = await supabase
+    .from("game_sessions")
+    .update({ settlement_tx_hash: txHash })
+    .eq("session_id", sessionId)
+    .eq("wallet_address", walletAddress);
+
+  if (error) {
+    throw error;
+  }
+
+  return txHash;
 }
 
 async function clearUnsettlablePendingSession(sessionId: string) {
@@ -129,8 +230,14 @@ async function ensureSettlementSignature(
 ) {
   const existingSignature = String(session.settlement_signature ?? "").trim();
   const existingDeadline = Number(session.settlement_deadline ?? 0);
+  const now = Math.floor(Date.now() / 1000);
+  const minValidSeconds = 30;
 
-  if (existingSignature && existingDeadline > 0) {
+  if (
+    existingSignature &&
+    existingDeadline > 0 &&
+    existingDeadline > now + minValidSeconds
+  ) {
     return {
       signature: existingSignature,
       deadline: existingDeadline,
@@ -466,7 +573,62 @@ async function clearSettlement(req: Request, res: Response) {
   res.json({ success: true });
 }
 
+async function submitSettlement(req: Request, res: Response) {
+  const walletAddress = req.walletAddress!;
+  const { sessionId } = req.body as { sessionId?: string };
+
+  if (!sessionId) {
+    res.status(400).json({ error: "Missing sessionId." });
+    return;
+  }
+
+  const { data: session, error } = await supabase
+    .from("game_sessions")
+    .select(
+      "session_id, wallet_address, onchain_session_id, stake_amount, status, final_multiplier, payout_amount, settlement_signature, settlement_deadline, settlement_tx_hash"
+    )
+    .eq("session_id", sessionId)
+    .eq("wallet_address", walletAddress)
+    .single();
+
+  if (error || !session) {
+    res.status(404).json({ error: "Session not found." });
+    return;
+  }
+
+  const status = String(session.status ?? "");
+  if (status !== "CASHED_OUT" && status !== "CRASHED") {
+    res.status(409).json({ error: "Session belum siap untuk settlement." });
+    return;
+  }
+
+  try {
+    const txHash = await submitSettlementForSession({
+      walletAddress,
+      session: session as Record<string, unknown>,
+    });
+    res.json({ success: true, txHash });
+  } catch (submitError) {
+    console.error(`❌ Failed to submit settlement ${sessionId}:`, submitError);
+
+    if (isAlreadySettledLikeError(submitError)) {
+      // If chain state already closed, don't keep blocking new runs.
+      await supabase
+        .from("game_sessions")
+        .update({ settlement_tx_hash: "already-settled-onchain" })
+        .eq("session_id", sessionId)
+        .eq("wallet_address", walletAddress);
+
+      res.json({ success: true, txHash: "already-settled-onchain" });
+      return;
+    }
+
+    res.status(500).json({ error: toSettlementErrorMessage(submitError) });
+  }
+}
+
 router.post("/clear-settlement", requireAuth, clearSettlement);
 router.post("/clear-claim", requireAuth, clearSettlement);
+router.post("/submit-settlement", requireAuth, submitSettlement);
 
 export default router;

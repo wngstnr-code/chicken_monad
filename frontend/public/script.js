@@ -16,7 +16,7 @@ const CP_INTERVAL = 40; // checkpoint every 40 steps
 const SEGMENT_TIME_MS = 60 * 1000; // 60s between CPs
 const CP_MAX_STAY_MS = 60 * 1000; // auto-exit CP after 60s
 const DECAY_BP_PER_SEC = 1000; // -0.1x per second = -1000 bp/s
-const SPEED_MULT_PER_CP = 1.3; // vehicle speed × 1.3 per CP
+const SPEED_MULT_PER_CP = 1.1; // vehicle speed × 1.3 per CP
 const MAX_MOVE_QUEUE = 8;
 
 const bet = {
@@ -47,6 +47,7 @@ const bet = {
 
 let gameOver = false;
 let settlementPending = false;
+let lastLiveBetStatusMessage = "";
 
 function getBridge() {
   return window.__CHICKEN_MONAD_BRIDGE__;
@@ -83,12 +84,39 @@ function renderBalance() {
   if (el) el.innerText = "$" + bet.balance.toFixed(2);
 }
 
-function dispatchPlayStatus({ message = "", tone = "info", sticky = false, clear = false, durationMs } = {}) {
+function dispatchPlayStatus({
+  message = "",
+  tone = "info",
+  sticky = false,
+  clear = false,
+  durationMs,
+} = {}) {
   window.dispatchEvent(
     new CustomEvent("chicken:play-status", {
       detail: { message, tone, sticky, clear, durationMs },
-    })
+    }),
   );
+}
+
+function syncLiveBetStatus() {
+  if (!bet.active || settlementPending || bet.reconnecting) {
+    lastLiveBetStatusMessage = "";
+    return;
+  }
+
+  const mult = bet.multiplierBp / 10000;
+  const payout = bet.stake * mult;
+  const message = `LIVE BET $${bet.stake.toFixed(2)} • ${mult.toFixed(
+    2,
+  )}x • $${payout.toFixed(2)} • CP ${bet.currentCp}`;
+
+  if (message === lastLiveBetStatusMessage) return;
+  lastLiveBetStatusMessage = message;
+  dispatchPlayStatus({
+    message,
+    tone: "ready",
+    sticky: true,
+  });
 }
 
 function formatBridgeError(error, fallback, userRejectedMessage) {
@@ -139,7 +167,13 @@ function formatBridgeError(error, fallback, userRejectedMessage) {
   }
 
   let simplified = message.split(/\r?\n/)[0]?.trim() || "";
-  ["Details:", "Request Arguments:", "Request body:", "URL:", "Version:"].forEach((marker) => {
+  [
+    "Details:",
+    "Request Arguments:",
+    "Request body:",
+    "URL:",
+    "Version:",
+  ].forEach((marker) => {
     const index = simplified.indexOf(marker);
     if (index >= 0) {
       simplified = simplified.slice(0, index).trim();
@@ -180,7 +214,7 @@ function setDepositButtonState(label = "DEPOSIT", busy = false) {
   window.dispatchEvent(
     new CustomEvent("chicken:deposit-ui-state", {
       detail: { label, busy },
-    })
+    }),
   );
 }
 
@@ -257,6 +291,8 @@ function activateBet(stake, availableBalance) {
   showBetPanel(false);
   hideResult();
   setBetButtonState();
+  dispatchPlayStatus({ clear: true });
+  lastLiveBetStatusMessage = "";
 
   initializeGame();
   return true;
@@ -306,10 +342,12 @@ async function startBet(stake) {
       const message = formatBridgeError(
         error,
         "Failed to start live bet.",
-        "Start bet dibatalkan di wallet."
+        "Start bet dibatalkan di wallet.",
       );
       console.error("Failed to start live bet:", error);
-      window.dispatchEvent(new CustomEvent("chicken:game-error", { detail: { message } }));
+      window.dispatchEvent(
+        new CustomEvent("chicken:game-error", { detail: { message } }),
+      );
       void loadBalance();
       return false;
     }
@@ -413,7 +451,7 @@ async function cashOut(reason) {
       const message = formatBridgeError(
         error,
         fallbackMessage,
-        "Cash out dibatalkan di wallet."
+        "Cash out dibatalkan di wallet.",
       );
       keepStatusMessage = true;
       dispatchPlayStatus({
@@ -496,7 +534,7 @@ async function crashBet(reason) {
       const message = formatBridgeError(
         error,
         "Failed to settle crash.",
-        "Settlement run dibatalkan di wallet."
+        "Settlement run dibatalkan di wallet.",
       );
       keepStatusMessage = true;
       dispatchPlayStatus({
@@ -692,6 +730,8 @@ function renderBetHud() {
       cashoutBtn.innerText = "RUN TO NEXT CP";
     }
   }
+
+  syncLiveBetStatus();
 }
 
 function showBetPanel(show) {
@@ -736,8 +776,14 @@ function restoreActiveBetFromSnapshot(snapshot) {
   const maxRow = Math.max(row, Number(snapshot.maxRow) || 0);
   const currentCp = Math.max(0, Number(snapshot.cp) || 0);
   const cashoutWindow = Boolean(snapshot.cashoutWindow);
-  const segmentRemainingMs = Math.max(0, Number(snapshot.segmentRemainingMs) || 0);
-  const cpStayRemainingMs = Math.max(0, Number(snapshot.cpStayRemainingMs) || 0);
+  const segmentRemainingMs = Math.max(
+    0,
+    Number(snapshot.segmentRemainingMs) || 0,
+  );
+  const cpStayRemainingMs = Math.max(
+    0,
+    Number(snapshot.cpStayRemainingMs) || 0,
+  );
   const decayBp = Math.max(0, Number(snapshot.decayBp) || 0);
   const now = Date.now();
 
@@ -751,11 +797,14 @@ function restoreActiveBetFromSnapshot(snapshot) {
   bet.cashoutWindow = cashoutWindow;
   bet.cpRowIndex = cashoutWindow ? row : currentCp * CP_INTERVAL;
   bet.cpStayRemainingMs = cashoutWindow ? cpStayRemainingMs : 0;
-  bet.cpEnterTime = cashoutWindow ? now - Math.max(0, CP_MAX_STAY_MS - cpStayRemainingMs) : 0;
+  bet.cpEnterTime = cashoutWindow
+    ? now - Math.max(0, CP_MAX_STAY_MS - cpStayRemainingMs)
+    : 0;
   bet.segmentActive = !cashoutWindow;
-  bet.segmentStart = segmentRemainingMs > 0
-    ? now - Math.max(0, SEGMENT_TIME_MS - segmentRemainingMs)
-    : now - SEGMENT_TIME_MS - Math.floor((decayBp * 1000) / DECAY_BP_PER_SEC);
+  bet.segmentStart =
+    segmentRemainingMs > 0
+      ? now - Math.max(0, SEGMENT_TIME_MS - segmentRemainingMs)
+      : now - SEGMENT_TIME_MS - Math.floor((decayBp * 1000) / DECAY_BP_PER_SEC);
   bet.lastDecayTick = now;
   bet.isDecaying = !cashoutWindow && decayBp > 0;
   bet.multiplierBp = getCurrentEffectiveMultiplierBp(now);
@@ -809,7 +858,8 @@ function showResult(data) {
   if (data.type === "cashout") {
     titleEl.innerText = "CASHED OUT";
     titleEl.style.color = "#27ae60";
-    const profitClass = data.profit >= 0 ? "profit-positive" : "profit-negative";
+    const profitClass =
+      data.profit >= 0 ? "profit-positive" : "profit-negative";
     const profitSign = data.profit >= 0 ? "+" : "-";
     bodyEl.innerHTML = `
       <p>Checkpoint: <strong>${data.cp}</strong></p>
@@ -852,7 +902,7 @@ function Camera() {
     height / 2, // top
     height / -2, // bottom
     100, // near
-    900 // far
+    900, // far
   );
 
   camera.up.set(0, 0, 1);
@@ -897,7 +947,6 @@ export const truckLeftSideTexture = Texture(25, 30, [
   { x: 15, y: 15, w: 10, h: 10 },
 ]);
 
-
 function Car(initialTileIndex, direction, color) {
   const car = new THREE.Group();
   car.position.x = initialTileIndex * tileSize;
@@ -905,7 +954,7 @@ function Car(initialTileIndex, direction, color) {
 
   const main = new THREE.Mesh(
     new THREE.BoxGeometry(60, 30, 15),
-    new THREE.MeshLambertMaterial({ color, flatShading: true })
+    new THREE.MeshLambertMaterial({ color, flatShading: true }),
   );
   main.position.z = 12;
   main.castShadow = true;
@@ -945,14 +994,14 @@ function Car(initialTileIndex, direction, color) {
   const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfff4b0 });
   const headlightL = new THREE.Mesh(
     new THREE.BoxGeometry(1, 4, 3),
-    headlightMat
+    headlightMat,
   );
   headlightL.position.set(30.5, -10, 11);
   car.add(headlightL);
 
   const headlightR = new THREE.Mesh(
     new THREE.BoxGeometry(1, 4, 3),
-    headlightMat
+    headlightMat,
   );
   headlightR.position.set(30.5, 10, 11);
   car.add(headlightR);
@@ -960,14 +1009,14 @@ function Car(initialTileIndex, direction, color) {
   const taillightMat = new THREE.MeshBasicMaterial({ color: 0xff4d4d });
   const taillightL = new THREE.Mesh(
     new THREE.BoxGeometry(1, 4, 2.5),
-    taillightMat
+    taillightMat,
   );
   taillightL.position.set(-30.5, -10, 11);
   car.add(taillightL);
 
   const taillightR = new THREE.Mesh(
     new THREE.BoxGeometry(1, 4, 2.5),
-    taillightMat
+    taillightMat,
   );
   taillightR.position.set(-30.5, 10, 11);
   car.add(taillightR);
@@ -978,15 +1027,12 @@ function Car(initialTileIndex, direction, color) {
   });
   const bumperFront = new THREE.Mesh(
     new THREE.BoxGeometry(1, 28, 4),
-    bumperMat
+    bumperMat,
   );
   bumperFront.position.set(30.5, 0, 8);
   car.add(bumperFront);
 
-  const bumperBack = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 28, 4),
-    bumperMat
-  );
+  const bumperBack = new THREE.Mesh(new THREE.BoxGeometry(1, 28, 4), bumperMat);
   bumperBack.position.set(-30.5, 0, 8);
   car.add(bumperBack);
 
@@ -1048,7 +1094,11 @@ function createMonadCheckpointBannerTexture(cpNumber) {
   ctx.font = "bold 38px Arial";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(`CHECKPOINT ${cpNumber}`, canvas.width / 2 + 16, canvas.height / 2);
+  ctx.fillText(
+    `CHECKPOINT ${cpNumber}`,
+    canvas.width / 2 + 16,
+    canvas.height / 2,
+  );
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
@@ -1088,7 +1138,7 @@ function Grass(rowIndex, isCheckpoint) {
   const createSection = (color) =>
     new THREE.Mesh(
       new THREE.BoxGeometry(tilesPerRow * tileSize, tileSize, 3),
-      new THREE.MeshLambertMaterial({ color })
+      new THREE.MeshLambertMaterial({ color }),
     );
 
   const middleColor = isCheckpoint ? 0xffe066 : 0xbaf455;
@@ -1128,7 +1178,7 @@ function Grass(rowIndex, isCheckpoint) {
 
     const banner = new THREE.Mesh(
       new THREE.BoxGeometry(tilesPerRow * tileSize * 0.75, 2, 12),
-      bannerMat
+      bannerMat,
     );
     banner.position.set(0, -5, 36);
     banner.castShadow = true;
@@ -1140,7 +1190,7 @@ function Grass(rowIndex, isCheckpoint) {
         map: createGmonadGroundTexture(),
         transparent: true,
         depthWrite: false,
-      })
+      }),
     );
     gmonadGroundLabel.position.set(0, 0, 1.7);
     grass.add(gmonadGroundLabel);
@@ -1149,7 +1199,7 @@ function Grass(rowIndex, isCheckpoint) {
     [-1, 1].forEach((side) => {
       const flag = new THREE.Mesh(
         new THREE.BoxGeometry(2, 2, 18),
-        new THREE.MeshLambertMaterial({ color: 0x7d5cff, flatShading: true })
+        new THREE.MeshLambertMaterial({ color: 0x7d5cff, flatShading: true }),
       );
       flag.position.set(side * tilesPerRow * tileSize * 0.42, 15, 9);
       flag.castShadow = true;
@@ -1157,12 +1207,12 @@ function Grass(rowIndex, isCheckpoint) {
 
       const flagTop = new THREE.Mesh(
         new THREE.BoxGeometry(8, 1, 5),
-        new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true })
+        new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }),
       );
       flagTop.position.set(
         side * tilesPerRow * tileSize * 0.42 + side * 4,
         15,
-        16
+        16,
       );
       grass.add(flagTop);
     });
@@ -1176,7 +1226,7 @@ function Grass(rowIndex, isCheckpoint) {
 
     const stem = new THREE.Mesh(
       new THREE.BoxGeometry(0.8, 0.8, 3),
-      new THREE.MeshLambertMaterial({ color: 0x4a7c1f, flatShading: true })
+      new THREE.MeshLambertMaterial({ color: 0x4a7c1f, flatShading: true }),
     );
     stem.position.z = 3;
     flowerGroup.add(stem);
@@ -1186,14 +1236,13 @@ function Grass(rowIndex, isCheckpoint) {
       new THREE.MeshLambertMaterial({
         color: flowerColors[Math.floor(Math.random() * flowerColors.length)],
         flatShading: true,
-      })
+      }),
     );
     petal.position.z = 5.5;
     flowerGroup.add(petal);
 
     flowerGroup.position.x =
-      side *
-      ((tilesPerRow / 2) * tileSize + 30 + Math.random() * 260);
+      side * ((tilesPerRow / 2) * tileSize + 30 + Math.random() * 260);
     flowerGroup.position.y = (Math.random() - 0.5) * tileSize * 0.8;
     grass.add(flowerGroup);
   }
@@ -1201,7 +1250,7 @@ function Grass(rowIndex, isCheckpoint) {
   if (Math.random() < 0.4) {
     const bush = new THREE.Mesh(
       new THREE.BoxGeometry(8, 8, 6),
-      new THREE.MeshLambertMaterial({ color: 0x6fa832, flatShading: true })
+      new THREE.MeshLambertMaterial({ color: 0x6fa832, flatShading: true }),
     );
     const side = Math.random() < 0.5 ? -1 : 1;
     bush.position.x =
@@ -1259,7 +1308,7 @@ function addRows() {
         const car = Car(
           vehicle.initialTileIndex,
           rowData.direction,
-          vehicle.color
+          vehicle.color,
         );
         vehicle.ref = car;
         row.add(car);
@@ -1275,7 +1324,7 @@ function addRows() {
         const truck = Truck(
           vehicle.initialTileIndex,
           rowData.direction,
-          vehicle.color
+          vehicle.color,
         );
         vehicle.ref = truck;
         row.add(truck);
@@ -1431,7 +1480,7 @@ function queueMove(direction) {
       rowIndex: position.currentRow,
       tileIndex: position.currentTile,
     },
-    [...movesQueue, direction]
+    [...movesQueue, direction],
   );
 
   if (!isValidMove) return;
@@ -1504,7 +1553,7 @@ function Road(rowIndex) {
   const createSection = (color) =>
     new THREE.Mesh(
       new THREE.PlaneGeometry(tilesPerRow * tileSize, tileSize),
-      new THREE.MeshLambertMaterial({ color })
+      new THREE.MeshLambertMaterial({ color }),
     );
 
   const middle = createSection(0x454a59);
@@ -1525,14 +1574,14 @@ function Road(rowIndex) {
   });
   const curbFront = new THREE.Mesh(
     new THREE.BoxGeometry(tilesPerRow * tileSize, 1.5, 2),
-    curbMat
+    curbMat,
   );
   curbFront.position.set(0, tileSize / 2 - 0.5, 1);
   road.add(curbFront);
 
   const curbBack = new THREE.Mesh(
     new THREE.BoxGeometry(tilesPerRow * tileSize, 1.5, 2),
-    curbMat
+    curbMat,
   );
   curbBack.position.set(0, -tileSize / 2 + 0.5, 1);
   road.add(curbBack);
@@ -1549,7 +1598,7 @@ function Tree(tileIndex, height, variant = "round") {
     new THREE.MeshLambertMaterial({
       color: 0x6b4226,
       flatShading: true,
-    })
+    }),
   );
   trunk.position.z = 10;
   trunk.castShadow = true;
@@ -1564,7 +1613,7 @@ function Tree(tileIndex, height, variant = "round") {
       const shade = i === 0 ? 0x2f7a3a : i === 1 ? 0x3d8f47 : 0x4fa558;
       const tier = new THREE.Mesh(
         new THREE.BoxGeometry(size, size, tierH),
-        new THREE.MeshLambertMaterial({ color: shade, flatShading: true })
+        new THREE.MeshLambertMaterial({ color: shade, flatShading: true }),
       );
       tier.position.z = 20 + i * tierH + tierH / 2;
       tier.castShadow = true;
@@ -1577,7 +1626,7 @@ function Tree(tileIndex, height, variant = "round") {
       new THREE.MeshLambertMaterial({
         color: 0x7aa21d,
         flatShading: true,
-      })
+      }),
     );
     crown.position.z = height / 2 + 20;
     crown.castShadow = true;
@@ -1589,7 +1638,7 @@ function Tree(tileIndex, height, variant = "round") {
       new THREE.MeshLambertMaterial({
         color: 0x94c043,
         flatShading: true,
-      })
+      }),
     );
     crownTop.position.z = height + 20 + 4;
     crownTop.castShadow = true;
@@ -1600,7 +1649,7 @@ function Tree(tileIndex, height, variant = "round") {
       new THREE.MeshLambertMaterial({
         color: 0x5c8510,
         flatShading: true,
-      })
+      }),
     );
     bump.position.set(6, 6, height / 2 + 20 + height / 4);
     tree.add(bump);
@@ -1619,7 +1668,7 @@ function Truck(initialTileIndex, direction, color) {
     new THREE.MeshLambertMaterial({
       color: 0xf2f2f2,
       flatShading: true,
-    })
+    }),
   );
   cargo.position.x = -15;
   cargo.position.z = 25;
@@ -1629,7 +1678,7 @@ function Truck(initialTileIndex, direction, color) {
 
   const cargoStripe = new THREE.Mesh(
     new THREE.BoxGeometry(72, 37, 3),
-    new THREE.MeshLambertMaterial({ color, flatShading: true })
+    new THREE.MeshLambertMaterial({ color, flatShading: true }),
   );
   cargoStripe.position.set(-15, 0, 22);
   truck.add(cargoStripe);
@@ -1667,14 +1716,14 @@ function Truck(initialTileIndex, direction, color) {
   const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfff4b0 });
   const headlightL = new THREE.Mesh(
     new THREE.BoxGeometry(1, 4, 3),
-    headlightMat
+    headlightMat,
   );
   headlightL.position.set(50.5, -10, 12);
   truck.add(headlightL);
 
   const headlightR = new THREE.Mesh(
     new THREE.BoxGeometry(1, 4, 3),
-    headlightMat
+    headlightMat,
   );
   headlightR.position.set(50.5, 10, 12);
   truck.add(headlightR);
@@ -1682,21 +1731,21 @@ function Truck(initialTileIndex, direction, color) {
   const taillightMat = new THREE.MeshBasicMaterial({ color: 0xff4d4d });
   const taillightL = new THREE.Mesh(
     new THREE.BoxGeometry(1, 4, 3),
-    taillightMat
+    taillightMat,
   );
   taillightL.position.set(-50.5, -12, 15);
   truck.add(taillightL);
 
   const taillightR = new THREE.Mesh(
     new THREE.BoxGeometry(1, 4, 3),
-    taillightMat
+    taillightMat,
   );
   taillightR.position.set(-50.5, 12, 15);
   truck.add(taillightR);
 
   const exhaust = new THREE.Mesh(
     new THREE.BoxGeometry(3, 3, 12),
-    new THREE.MeshLambertMaterial({ color: 0x555555, flatShading: true })
+    new THREE.MeshLambertMaterial({ color: 0x555555, flatShading: true }),
   );
   exhaust.position.set(25, -15, 43);
   truck.add(exhaust);
@@ -1719,7 +1768,7 @@ function Wheel(x) {
     new THREE.MeshLambertMaterial({
       color: 0x333333,
       flatShading: true,
-    })
+    }),
   );
   wheel.position.x = x;
   wheel.position.z = 6;
@@ -1828,7 +1877,7 @@ function generateForesMetadata() {
 
 function generateCarLaneMetadata() {
   const direction = randomElement([true, false]);
-  const speed = randomElement([200, 250, 300]);
+  const speed = randomElement([100, 130, 160]);
 
   const occupiedTiles = new Set();
 
@@ -1842,8 +1891,8 @@ function generateCarLaneMetadata() {
     occupiedTiles.add(initialTileIndex + 1);
 
     const color = randomElement([
-      0xe63946, 0xf4a261, 0x2a9d8f, 0x457b9d, 0xe76f51,
-      0xffb703, 0x9b5de5, 0x06d6a0,
+      0xe63946, 0xf4a261, 0x2a9d8f, 0x457b9d, 0xe76f51, 0xffb703, 0x9b5de5,
+      0x06d6a0,
     ]);
 
     return { initialTileIndex, color };
@@ -1925,7 +1974,7 @@ function setRotation(progress) {
   player.children[0].rotation.z = THREE.MathUtils.lerp(
     player.children[0].rotation.z,
     endRotation,
-    progress
+    progress,
   );
 }
 
@@ -1982,16 +2031,28 @@ document
   ?.addEventListener("click", () => queueMove("right"));
 
 window.addEventListener("keydown", (event) => {
-  if (event.key === "ArrowUp") {
+  const target = event.target;
+  if (
+    target instanceof HTMLElement &&
+    (target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.tagName === "SELECT" ||
+      target.isContentEditable)
+  ) {
+    return;
+  }
+
+  const key = String(event.key || "").toLowerCase();
+  if (event.key === "ArrowUp" || key === "w") {
     event.preventDefault(); // Avoid scrolling the page
     queueMove("forward");
-  } else if (event.key === "ArrowDown") {
+  } else if (event.key === "ArrowDown" || key === "s") {
     event.preventDefault(); // Avoid scrolling the page
     queueMove("backward");
-  } else if (event.key === "ArrowLeft") {
+  } else if (event.key === "ArrowLeft" || key === "a") {
     event.preventDefault(); // Avoid scrolling the page
     queueMove("left");
-  } else if (event.key === "ArrowRight") {
+  } else if (event.key === "ArrowRight" || key === "d") {
     event.preventDefault(); // Avoid scrolling the page
     queueMove("right");
   }
@@ -2072,8 +2133,12 @@ function initBettingUI() {
   const depositFaucet = document.getElementById("deposit-faucet");
   const depositManageFunds = document.getElementById("deposit-manage-funds");
   const depositStatus = document.getElementById("deposit-status");
-  const depositWalletBalance = document.getElementById("deposit-wallet-balance");
-  const depositVaultAvailable = document.getElementById("deposit-vault-available");
+  const depositWalletBalance = document.getElementById(
+    "deposit-wallet-balance",
+  );
+  const depositVaultAvailable = document.getElementById(
+    "deposit-vault-available",
+  );
   const depositVaultLocked = document.getElementById("deposit-vault-locked");
   const depositAllowance = document.getElementById("deposit-allowance");
   const leaderboardBtn = document.getElementById("leaderboard-btn");
@@ -2151,7 +2216,9 @@ function initBettingUI() {
   }
 
   function normalizeWallet(address) {
-    return String(address || "").trim().toLowerCase();
+    return String(address || "")
+      .trim()
+      .toLowerCase();
   }
 
   function leaderboardBestScore(entry) {
@@ -2230,10 +2297,13 @@ function initBettingUI() {
     if (statsTotalGames) statsTotalGames.innerText = String(totalGames);
     if (statsTotalWins) statsTotalWins.innerText = String(totalWins);
     if (statsTotalLosses) statsTotalLosses.innerText = String(totalLosses);
-    if (statsJoined) statsJoined.innerText = formatJoinedText(playerStats?.created_at);
+    if (statsJoined)
+      statsJoined.innerText = formatJoinedText(playerStats?.created_at);
 
     if (statsTotalProfit) {
-      statsTotalProfit.innerText = formatStatsUsd(totalProfit, { signed: true });
+      statsTotalProfit.innerText = formatStatsUsd(totalProfit, {
+        signed: true,
+      });
       statsTotalProfit.classList.remove("positive", "negative");
       if (totalProfit > 0) statsTotalProfit.classList.add("positive");
       if (totalProfit < 0) statsTotalProfit.classList.add("negative");
@@ -2262,15 +2332,27 @@ function initBettingUI() {
 
   function getTransactionBadge(type) {
     const normalized = String(type || "").toUpperCase();
-    if (normalized === "DEPOSIT") return { label: "DEPOSIT", className: "deposit" };
-    if (normalized === "WITHDRAW") return { label: "WITHDRAW", className: "withdraw" };
-    if (normalized === "TREASURY_FUNDED") return { label: "FAUCET", className: "deposit" };
-    if (normalized === "SESSION_STARTED") return { label: "BET", className: "start" };
-    if (normalized === "SESSION_SETTLED") return { label: "SETTLED", className: "settle" };
+    if (normalized === "DEPOSIT")
+      return { label: "DEPOSIT", className: "deposit" };
+    if (normalized === "WITHDRAW")
+      return { label: "WITHDRAW", className: "withdraw" };
+    if (normalized === "TREASURY_FUNDED")
+      return { label: "FAUCET", className: "deposit" };
+    if (normalized === "SESSION_STARTED")
+      return { label: "BET", className: "start" };
+    if (normalized === "SESSION_SETTLED")
+      return { label: "SETTLED", className: "settle" };
     return { label: normalized || "EVENT", className: "other" };
   }
 
-  function createStatsRow({ badge, topText, dateText, mainText, valueText, valueTone }) {
+  function createStatsRow({
+    badge,
+    topText,
+    dateText,
+    mainText,
+    valueText,
+    valueTone,
+  }) {
     const row = document.createElement("div");
     row.className = "stats-row";
 
@@ -2349,7 +2431,7 @@ function initBettingUI() {
             mainText: `HASH ${shortHash(entry?.tx_hash)}`,
             valueText: formatStatsUsd(amount, { signed: false }),
             valueTone: tone,
-          })
+          }),
         );
       });
       return;
@@ -2376,7 +2458,7 @@ function initBettingUI() {
           mainText: `HOPS ${hops} / ${multiplier.toFixed(2)}x`,
           valueText: formatStatsUsd(profit, { signed: true }),
           valueTone: profit > 0 ? "positive" : profit < 0 ? "negative" : "",
-        })
+        }),
       );
     });
   }
@@ -2439,7 +2521,9 @@ function initBettingUI() {
       if (!hasLiveBridge()) {
         if (leaderboardList) leaderboardList.innerHTML = "";
         if (leaderboardYourRank) leaderboardYourRank.innerText = "Demo mode";
-        setLeaderboardStatus("Connect wallet + backend session to view leaderboard.");
+        setLeaderboardStatus(
+          "Connect wallet + backend session to view leaderboard.",
+        );
         return;
       }
 
@@ -2453,7 +2537,7 @@ function initBettingUI() {
         ? [...payload.leaderboard]
         : [];
       leaderboard.sort(
-        (a, b) => leaderboardBestScore(b) - leaderboardBestScore(a)
+        (a, b) => leaderboardBestScore(b) - leaderboardBestScore(a),
       );
 
       const topTen = leaderboard.slice(0, 10);
@@ -2462,7 +2546,9 @@ function initBettingUI() {
       const bridgeWallet = bridge?.getWalletAddress
         ? bridge.getWalletAddress()
         : "";
-      const walletAddress = String(payload?.walletAddress || bridgeWallet || "");
+      const walletAddress = String(
+        payload?.walletAddress || bridgeWallet || "",
+      );
       const normalizedWallet = normalizeWallet(walletAddress);
 
       if (leaderboardYourRank) {
@@ -2471,7 +2557,7 @@ function initBettingUI() {
         } else {
           const rankIndex = leaderboard.findIndex(
             (entry) =>
-              normalizeWallet(entry?.wallet_address) === normalizedWallet
+              normalizeWallet(entry?.wallet_address) === normalizedWallet,
           );
 
           if (rankIndex >= 0) {
@@ -2496,7 +2582,7 @@ function initBettingUI() {
       if (leaderboardYourRank) leaderboardYourRank.innerText = "-";
       setLeaderboardStatus(
         formatBridgeError(error, "Gagal memuat leaderboard."),
-        true
+        true,
       );
     } finally {
       leaderboardBusy = false;
@@ -2538,7 +2624,7 @@ function initBettingUI() {
 
     const bridge = hasLiveBridge() ? getBridge() : null;
     const currentWalletKey = normalizeWallet(
-      bridge?.getWalletAddress ? bridge.getWalletAddress() : ""
+      bridge?.getWalletAddress ? bridge.getWalletAddress() : "",
     );
     const hasFreshCache =
       statsCache.player &&
@@ -2574,11 +2660,12 @@ function initBettingUI() {
         throw new Error("Stats bridge belum siap.");
       }
 
-      const [playerStats, historyPayload, transactionPayload] = await Promise.all([
-        bridge.loadPlayerStats(),
-        bridge.loadGameHistory(3),
-        bridge.loadPlayerTransactions(3),
-      ]);
+      const [playerStats, historyPayload, transactionPayload] =
+        await Promise.all([
+          bridge.loadPlayerStats(),
+          bridge.loadGameHistory(3),
+          bridge.loadPlayerTransactions(3),
+        ]);
 
       statsCache.player = playerStats || null;
       statsCache.sessions = Array.isArray(historyPayload?.sessions)
@@ -2588,7 +2675,7 @@ function initBettingUI() {
         ? transactionPayload.transactions
         : [];
       statsWalletKey = normalizeWallet(
-        playerStats?.wallet_address || currentWalletKey
+        playerStats?.wallet_address || currentWalletKey,
       );
 
       setStatsSummary(statsCache.player);
@@ -2610,7 +2697,7 @@ function initBettingUI() {
       renderStatsEmpty("Could not load player stats.");
       setStatsStatus(
         formatBridgeError(error, "Gagal memuat player stats."),
-        true
+        true,
       );
     } finally {
       statsBusy = false;
@@ -2647,21 +2734,27 @@ function initBettingUI() {
 
   function setDepositBalanceCard(snapshot) {
     if (depositWalletBalance) {
-      depositWalletBalance.innerText = formatDepositAmount(snapshot?.walletBalance);
+      depositWalletBalance.innerText = formatDepositAmount(
+        snapshot?.walletBalance,
+      );
     }
     if (depositVaultAvailable) {
       depositVaultAvailable.innerText = formatDepositAmount(
         snapshot?.availableBalance,
-        "$0.00"
+        "$0.00",
       );
     }
     if (depositVaultLocked) {
-      depositVaultLocked.innerText = formatDepositAmount(snapshot?.lockedBalance, "$0.00");
+      depositVaultLocked.innerText = formatDepositAmount(
+        snapshot?.lockedBalance,
+        "$0.00",
+      );
     }
     if (depositAllowance) {
       const allowance = snapshot?.allowance;
       if (!isFinite(allowance)) depositAllowance.innerText = "-";
-      else if (allowance > 999999) depositAllowance.innerText = "Unlimited (approved)";
+      else if (allowance > 999999)
+        depositAllowance.innerText = "Unlimited (approved)";
       else depositAllowance.innerText = formatDepositAmount(allowance, "$0.00");
     }
   }
@@ -2786,9 +2879,7 @@ function initBettingUI() {
     }
 
     const statsVisible =
-      statsModal &&
-      statsBtn &&
-      statsModal.style.display !== "none";
+      statsModal && statsBtn && statsModal.style.display !== "none";
     if (
       statsVisible &&
       !statsModal.contains(target) &&
@@ -2919,7 +3010,7 @@ function initBettingUI() {
         const message = formatBridgeError(
           error,
           "Deposit gagal.",
-          "Deposit dibatalkan di wallet."
+          "Deposit dibatalkan di wallet.",
         );
         setDepositStatus(message, true);
         dispatchPlayStatus({
@@ -2972,7 +3063,7 @@ function initBettingUI() {
         const message = formatBridgeError(
           error,
           "Claim faucet gagal.",
-          "Claim faucet dibatalkan di wallet."
+          "Claim faucet dibatalkan di wallet.",
         );
         setDepositStatus(message, true);
         dispatchPlayStatus({
@@ -3025,7 +3116,8 @@ function initBettingUI() {
       toast.className = "flow-alert";
       toast.style.marginTop = "10px";
       toast.style.marginBottom = "10px";
-      const btnContainer = document.getElementById("start-bet-btn")?.parentElement;
+      const btnContainer =
+        document.getElementById("start-bet-btn")?.parentElement;
       if (btnContainer && btnContainer.parentNode) {
         btnContainer.parentNode.insertBefore(toast, btnContainer);
       } else {
@@ -3050,8 +3142,8 @@ function initBettingUI() {
     if (!hasLiveBridge() && stake > bet.balance) {
       showErrorToast(
         `Insufficient balance. You have $${bet.balance.toFixed(
-          2
-        )}. Deposit more first.`
+          2,
+        )}. Deposit more first.`,
       );
       return;
     }
@@ -3064,8 +3156,8 @@ function initBettingUI() {
           if (!isFinite(available) || available < stake) {
             showErrorToast(
               `Vault balance kurang. Available $${(available || 0).toFixed(
-                2
-              )}. Deposit dulu.`
+                2,
+              )}. Deposit dulu.`,
             );
             return;
           }
@@ -3073,7 +3165,7 @@ function initBettingUI() {
           const message = formatBridgeError(
             error,
             "Gagal cek saldo vault.",
-            "Permintaan dibatalkan di wallet."
+            "Permintaan dibatalkan di wallet.",
           );
           console.error("Failed to load available vault balance:", error);
           dispatchPlayStatus({
@@ -3103,6 +3195,8 @@ function initBettingUI() {
       const started = await startBet(stake);
       if (!started) {
         keepStatusMessage = true;
+      } else {
+        dispatchPlayStatus({ clear: true });
       }
     } finally {
       startBetBusy = false;
@@ -3231,7 +3325,8 @@ function initBettingUI() {
     bet.cpStayRemainingMs = 0;
     bet.isDecaying = false;
     renderBetHud();
-    const msg = event?.detail?.message || "Checkpoint window expired — keep moving!";
+    const msg =
+      event?.detail?.message || "Checkpoint window expired — keep moving!";
     dispatchPlayStatus({
       message: msg,
       tone: "info",
@@ -3240,17 +3335,21 @@ function initBettingUI() {
     showErrorToast("⏰ " + msg);
   });
 
-  document.getElementById("leaderboard-close-btn")?.addEventListener("click", () => {
-    closeLeaderboardModal();
-  });
+  document
+    .getElementById("leaderboard-close-btn")
+    ?.addEventListener("click", () => {
+      closeLeaderboardModal();
+    });
 
   document.getElementById("stats-close-btn")?.addEventListener("click", () => {
     closeStatsModal();
   });
 
-  document.getElementById("leaderboard-modal")?.addEventListener("click", (e) => {
-    if (e.target.id === "leaderboard-modal") closeLeaderboardModal();
-  });
+  document
+    .getElementById("leaderboard-modal")
+    ?.addEventListener("click", (e) => {
+      if (e.target.id === "leaderboard-modal") closeLeaderboardModal();
+    });
 
   document.getElementById("stats-modal")?.addEventListener("click", (e) => {
     if (e.target.id === "stats-modal") closeStatsModal();

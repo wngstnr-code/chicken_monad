@@ -45,6 +45,7 @@ type StartedPayload = {
 type SettlementPayload = {
   sessionId: string;
   onchainSessionId: string;
+  settlementTxHash?: string;
   settlementSignature?: string;
   signature?: string;
   resolution?: ChickenBridgeSettlementResolution;
@@ -750,48 +751,31 @@ export function GameBridgeClient({
 
       let settledCount = 0;
       let failedCount = 0;
+      let firstFailureMessage = "";
 
       for (const s of candidates) {
         try {
-          const resolution = s.resolution || s.payload;
-          const signature = s.settlement_signature || s.signature;
-
-          if (!resolution || !signature) {
-            failedCount += 1;
-            continue;
-          }
-
           emitDepositProgress(
-            "settle_sign",
+            "settle_pending",
             `Settling old session ${String(s.onchain_session_id || "").slice(0, 10)}...`,
           );
 
-          const txHash = await writeAndConfirm({
-            address: GAME_SETTLEMENT_ADDRESS as Address,
-            abi: GAME_SETTLEMENT_ABI,
-            functionName: "settleWithSignature",
-            args: [resolution, signature as `0x${string}`],
-          });
-
-          await backendPost("/api/game/clear-settlement", {
+          await backendPost<{
+            success: boolean;
+            txHash?: string;
+          }>("/api/game/submit-settlement", {
             sessionId: s.session_id,
-            txHash,
           });
-
-          console.log(`✅ Old session ${s.session_id} settled: ${txHash}`);
+          console.log(`✅ Old session ${s.session_id} settled by backend.`);
           settledCount += 1;
         } catch (err) {
-          if (isUserRejectedRequestError(err)) {
-            emitDepositProgress(
-              "settle_cancelled",
-              "Settlement dibatalkan di wallet. Start bet dihentikan.",
-            );
-            throw new Error(
-              "Kamu cancel sign settlement session lama. Selesaikan dulu settlement itu lalu klik Start Bet lagi.",
+          console.error(`❌ Gagal settle old session ${s.session_id}:`, err);
+          if (!firstFailureMessage) {
+            firstFailureMessage = normalizeError(
+              err,
+              "Settlement pending gagal diproses.",
             );
           }
-
-          console.error(`❌ Gagal settle old session ${s.session_id}:`, err);
           failedCount += 1;
         }
       }
@@ -799,10 +783,12 @@ export function GameBridgeClient({
       if (failedCount > 0) {
         emitDepositProgress(
           "settle_incomplete",
-          `${failedCount} pending settlement belum berhasil disettle.`,
+          firstFailureMessage ||
+            `${failedCount} pending settlement belum berhasil disettle.`,
         );
         throw new Error(
-          `${failedCount} pending settlement belum berhasil disettle. Coba lagi sebelum start bet.`,
+          firstFailureMessage ||
+            `${failedCount} pending settlement belum berhasil disettle. Coba lagi sebelum start bet.`,
         );
       }
 
@@ -1265,33 +1251,30 @@ export function GameBridgeClient({
         socket.emit("game:cashout");
 
         const payload = await pendingCashout;
-        const resolution = payload.resolution || payload.payload;
-        const signature = payload.settlementSignature || payload.signature;
-        if (!resolution || !signature) {
+        const settlementResolution = payload.resolution || payload.payload;
+        const settlementSignature =
+          payload.settlementSignature || payload.signature || "";
+        if (!settlementResolution) {
           throw new Error("Payload settlement dari backend tidak lengkap.");
         }
-
-        let txHash: string;
+        let txHash = String(payload.settlementTxHash || "");
         try {
-          txHash = await writeAndConfirm({
-            address: GAME_SETTLEMENT_ADDRESS as Address,
-            abi: GAME_SETTLEMENT_ABI,
-            functionName: "settleWithSignature",
-            args: [resolution, signature as `0x${string}`],
-          });
+          if (!txHash && payload.sessionId) {
+            const submit = await backendPost<{ success: boolean; txHash?: string }>(
+              "/api/game/submit-settlement",
+              { sessionId: payload.sessionId },
+            );
+            txHash = String(submit?.txHash || "");
+          }
+          if (!txHash) {
+            throw new Error("Settlement tx hash belum tersedia.");
+          }
         } catch (error) {
           void refreshPlayBlockerStatus();
           throw new Error(
-            toUserFacingWalletError(error, "Transaksi cash out gagal.", {
-              userRejectedMessage: "Cash out dibatalkan di wallet.",
-            }),
+            normalizeError(error, "Settlement cash out gagal diproses backend."),
           );
         }
-
-        await backendPost<{ success: boolean }>("/api/game/clear-settlement", {
-          sessionId: payload.sessionId,
-          txHash,
-        });
 
         activeSessionIdRef.current = "";
         await refreshPlayBlockerStatus();
@@ -1300,8 +1283,8 @@ export function GameBridgeClient({
           onchainSessionId: payload.onchainSessionId,
           availableBalance: await readAvailableBalance(playerAddress),
           txHash,
-          resolution,
-          signature,
+          resolution: settlementResolution,
+          signature: settlementSignature,
           multiplier: Number(payload.multiplier || "0"),
           payoutAmount: Number(payload.payoutAmount || "0"),
           profit: Number(payload.profit || "0"),
@@ -1317,36 +1300,34 @@ export function GameBridgeClient({
         socket.emit("game:crash", { reason });
 
         const payload = await pendingCrash;
-        const resolution = payload.resolution || payload.payload;
-        const signature = payload.settlementSignature || payload.signature;
+        const settlementResolution = payload.resolution || payload.payload;
+        const settlementSignature =
+          payload.settlementSignature || payload.signature || "";
 
         activeSessionIdRef.current = "";
 
-        if (!resolution || !signature) {
+        if (!settlementResolution) {
           return null;
         }
 
-        let txHash: string;
+        let txHash = String(payload.settlementTxHash || "");
         try {
-          txHash = await writeAndConfirm({
-            address: GAME_SETTLEMENT_ADDRESS as Address,
-            abi: GAME_SETTLEMENT_ABI,
-            functionName: "settleWithSignature",
-            args: [resolution, signature as `0x${string}`],
-          });
+          if (!txHash && payload.sessionId) {
+            const submit = await backendPost<{ success: boolean; txHash?: string }>(
+              "/api/game/submit-settlement",
+              { sessionId: payload.sessionId },
+            );
+            txHash = String(submit?.txHash || "");
+          }
+          if (!txHash) {
+            throw new Error("Settlement tx hash belum tersedia.");
+          }
         } catch (error) {
           void refreshPlayBlockerStatus();
           throw new Error(
-            toUserFacingWalletError(error, "Settlement run gagal.", {
-              userRejectedMessage: "Settlement run dibatalkan di wallet.",
-            }),
+            normalizeError(error, "Settlement run gagal diproses backend."),
           );
         }
-
-        await backendPost<{ success: boolean }>("/api/game/clear-settlement", {
-          sessionId: payload.sessionId,
-          txHash,
-        });
 
         await refreshPlayBlockerStatus();
         return {
@@ -1354,8 +1335,8 @@ export function GameBridgeClient({
           onchainSessionId: payload.onchainSessionId,
           availableBalance: await readAvailableBalance(playerAddress),
           txHash,
-          resolution,
-          signature,
+          resolution: settlementResolution,
+          signature: settlementSignature,
           multiplier: Number(payload.multiplier || "0"),
           payoutAmount: Number(payload.payoutAmount || "0"),
           profit: Number(payload.profit || "0"),

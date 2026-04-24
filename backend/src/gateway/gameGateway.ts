@@ -43,6 +43,7 @@ import {
   type SignedSettlementResult,
   usdcToUint256,
 } from "../services/signatureService.js";
+import { submitSettlementOnchain } from "../services/settlementExecutor.js";
 
 let io: SocketServer;
 const SIGN_SETTLEMENT_TIMEOUT_MS = 10_000;
@@ -426,6 +427,7 @@ async function handleGameCrash(
   console.log(`💀 CRASHED: ${walletAddress} | Row: ${state.maxRow} | Reason: ${reason}`);
 
   let settlementResult = null;
+  let settlementTxHash: string | null = null;
   try {
     settlementResult = await signSettlementWithTimeout({
       playerAddress: walletAddress,
@@ -435,8 +437,13 @@ async function handleGameCrash(
       finalMultiplierBp: 0,
       outcome: SETTLEMENT_OUTCOME.CRASHED,
     });
+
+    settlementTxHash = await submitSettlementOnchain({
+      resolution: settlementResult.resolution,
+      signature: settlementResult.signature,
+    });
   } catch (err) {
-    console.error("❌ Crash settlement sign failed:", err);
+    console.error("❌ Crash settlement failed:", err);
   }
 
   await supabase
@@ -448,7 +455,7 @@ async function handleGameCrash(
       payout_amount: 0,
       settlement_signature: settlementResult?.signature ?? null,
       settlement_deadline: settlementResult?.resolution.deadline ?? null,
-      settlement_tx_hash: null,
+      settlement_tx_hash: settlementTxHash,
       ended_at: new Date().toISOString(),
     })
     .eq("session_id", state.sessionId);
@@ -480,6 +487,7 @@ async function handleGameCrash(
       settlementSignature: settlementResult?.signature ?? null,
       resolution: settlementResult?.resolution ?? null,
       signerAddress: settlementResult?.signerAddress ?? null,
+      settlementTxHash,
     });
   }
 
@@ -504,6 +512,7 @@ async function handleGameCashout(socket: Socket, walletAddress: string): Promise
   console.log(`💰 CASH OUT: ${walletAddress} | ${finalMultiplier.toFixed(4)}x | $${payoutAmount.toFixed(2)}`);
 
   let settlementResult;
+  let settlementTxHash: string;
   try {
     settlementResult = await signSettlementWithTimeout({
       playerAddress: walletAddress,
@@ -513,9 +522,13 @@ async function handleGameCashout(socket: Socket, walletAddress: string): Promise
       finalMultiplierBp,
       outcome: SETTLEMENT_OUTCOME.CASHED_OUT,
     });
+    settlementTxHash = await submitSettlementOnchain({
+      resolution: settlementResult.resolution,
+      signature: settlementResult.signature,
+    });
   } catch (err) {
-    console.error("❌ Sign failed:", err);
-    socket.emit("game:error", { message: "Failed to sign settlement." });
+    console.error("❌ Cashout settlement failed:", err);
+    socket.emit("game:error", { message: "Failed to settle game result." });
     return;
   }
 
@@ -528,7 +541,7 @@ async function handleGameCashout(socket: Socket, walletAddress: string): Promise
       payout_amount: payoutAmount,
       settlement_signature: settlementResult.signature,
       settlement_deadline: settlementResult.resolution.deadline,
-      settlement_tx_hash: null,
+      settlement_tx_hash: settlementTxHash,
       ended_at: new Date().toISOString(),
     })
     .eq("session_id", state.sessionId);
@@ -560,6 +573,7 @@ async function handleGameCashout(socket: Socket, walletAddress: string): Promise
     signature: settlementResult.signature,
     payload: settlementResult.resolution,
     signerAddress: settlementResult.signerAddress,
+    settlementTxHash,
   });
 
   removeGameState(walletAddress);
@@ -651,6 +665,7 @@ async function handleAutoCashout(walletAddress: string): Promise<void> {
   console.log(`🤖 AUTO CASH OUT: ${walletAddress} | ${finalMultiplier.toFixed(4)}x | $${payoutAmount.toFixed(2)}`);
 
   let settlementResult;
+  let settlementTxHash: string;
   try {
     settlementResult = await signSettlementWithTimeout({
       playerAddress: walletAddress,
@@ -659,6 +674,10 @@ async function handleAutoCashout(walletAddress: string): Promise<void> {
       payoutAmount,
       finalMultiplierBp,
       outcome: SETTLEMENT_OUTCOME.CASHED_OUT,
+    });
+    settlementTxHash = await submitSettlementOnchain({
+      resolution: settlementResult.resolution,
+      signature: settlementResult.signature,
     });
   } catch {
     await handleGameCrash(null, walletAddress, "auto_cashout_sign_failed");
@@ -674,7 +693,7 @@ async function handleAutoCashout(walletAddress: string): Promise<void> {
       payout_amount: payoutAmount,
       settlement_signature: settlementResult.signature,
       settlement_deadline: settlementResult.resolution.deadline,
-      settlement_tx_hash: null,
+      settlement_tx_hash: settlementTxHash,
       ended_at: new Date().toISOString(),
     })
     .eq("session_id", state.sessionId);
