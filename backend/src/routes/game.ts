@@ -3,7 +3,8 @@ import { createPublicClient, http, isHex, parseAbi, type Address, type Hex } fro
 import { requireAuth } from "../middleware/auth.js";
 import { env } from "../config/env.js";
 import { supabase } from "../config/supabase.js";
-import { hasActiveGame } from "../services/gameState.js";
+import { getGameByWallet, hasActiveGame, removeGameState } from "../services/gameState.js";
+import { getEffectiveMultiplierBp } from "../services/gameValidator.js";
 import {
   SETTLEMENT_OUTCOME,
   signSettlement,
@@ -54,6 +55,72 @@ async function clearUnsettlablePendingSession(sessionId: string) {
   if (error) {
     console.error(`❌ Failed to clear stale pending settlement ${sessionId}:`, error);
   }
+}
+
+async function applyCrashPlayerStats(walletAddress: string, stakeAmount: number) {
+  const { data: player } = await supabase
+    .from("players")
+    .select("total_losses, total_profit")
+    .eq("wallet_address", walletAddress)
+    .single();
+
+  if (!player) {
+    return;
+  }
+
+  await supabase
+    .from("players")
+    .update({
+      total_losses: Number(player.total_losses ?? 0) + 1,
+      total_profit: Number(player.total_profit ?? 0) - stakeAmount,
+    })
+    .eq("wallet_address", walletAddress);
+}
+
+async function crashAndPersistSession(params: {
+  walletAddress: string;
+  sessionId: string;
+  onchainSessionId: string;
+  stakeAmount: number;
+  maxRowReached?: number;
+  finalMultiplier?: number;
+}) {
+  const settlement = await signSettlement({
+    playerAddress: params.walletAddress,
+    onchainSessionId: params.onchainSessionId,
+    stakeAmount: params.stakeAmount,
+    payoutAmount: 0,
+    finalMultiplierBp: 0,
+    outcome: SETTLEMENT_OUTCOME.CRASHED,
+  });
+
+  const updates: Record<string, unknown> = {
+    status: "CRASHED",
+    final_multiplier: params.finalMultiplier ?? 0,
+    payout_amount: 0,
+    settlement_signature: settlement.signature,
+    settlement_deadline: settlement.resolution.deadline,
+    settlement_tx_hash: null,
+    ended_at: new Date().toISOString(),
+  };
+
+  if (typeof params.maxRowReached === "number") {
+    updates.max_row_reached = params.maxRowReached;
+  }
+
+  const { error } = await supabase
+    .from("game_sessions")
+    .update(updates)
+    .eq("session_id", params.sessionId)
+    .eq("wallet_address", params.walletAddress);
+
+  if (error) {
+    throw error;
+  }
+
+  await applyCrashPlayerStats(params.walletAddress, params.stakeAmount);
+
+  return settlement;
 }
 
 async function ensureSettlementSignature(
@@ -172,6 +239,84 @@ router.get("/active", requireAuth, async (req: Request, res: Response) => {
   });
 });
 
+async function forceEndActiveSession(req: Request, res: Response) {
+  const walletAddress = req.walletAddress!;
+  const activeGame = getGameByWallet(walletAddress);
+
+  if (activeGame) {
+    const effectiveMultiplierBp = activeGame.timer.segmentActive
+      ? getEffectiveMultiplierBp(
+          activeGame.multiplierBp,
+          activeGame.timer.segmentStart,
+          Date.now(),
+        )
+      : activeGame.multiplierBp;
+
+    try {
+      await crashAndPersistSession({
+        walletAddress,
+        sessionId: activeGame.sessionId,
+        onchainSessionId: activeGame.onchainSessionId,
+        stakeAmount: activeGame.stake,
+        maxRowReached: activeGame.maxRow,
+        finalMultiplier: effectiveMultiplierBp / 10_000,
+      });
+      removeGameState(walletAddress);
+      res.json({
+        success: true,
+        resolved: true,
+        source: "memory",
+        sessionId: activeGame.sessionId,
+        onchainSessionId: activeGame.onchainSessionId,
+      });
+      return;
+    } catch (error) {
+      console.error("❌ Failed to force-end active in-memory game:", error);
+      res.status(500).json({ error: "Failed to force-end active game." });
+      return;
+    }
+  }
+
+  const { data: staleSession, error } = await supabase
+    .from("game_sessions")
+    .select("session_id, onchain_session_id, stake_amount, max_row_reached")
+    .eq("wallet_address", walletAddress)
+    .eq("status", "ACTIVE")
+    .maybeSingle();
+
+  if (error) {
+    console.error("❌ Failed to query active game session:", error);
+    res.status(500).json({ error: "Failed to inspect active session." });
+    return;
+  }
+
+  if (!staleSession) {
+    res.json({ success: true, resolved: false, source: "none" });
+    return;
+  }
+
+  try {
+    await crashAndPersistSession({
+      walletAddress,
+      sessionId: String(staleSession.session_id),
+      onchainSessionId: String(staleSession.onchain_session_id),
+      stakeAmount: Number(staleSession.stake_amount ?? 0),
+      maxRowReached: Number(staleSession.max_row_reached ?? 0),
+      finalMultiplier: 0,
+    });
+    res.json({
+      success: true,
+      resolved: true,
+      source: "database",
+      sessionId: staleSession.session_id,
+      onchainSessionId: staleSession.onchain_session_id,
+    });
+  } catch (forceEndError) {
+    console.error("❌ Failed to force-end stale active session:", forceEndError);
+    res.status(500).json({ error: "Failed to force-end stale active session." });
+  }
+}
+
 async function getPendingSettlements(req: Request, res: Response) {
   const walletAddress = req.walletAddress!;
 
@@ -241,6 +386,7 @@ async function getPendingSettlements(req: Request, res: Response) {
 
 router.get("/pending-settlement", requireAuth, getPendingSettlements);
 router.get("/pending-claim", requireAuth, getPendingSettlements);
+router.post("/force-end-active", requireAuth, forceEndActiveSession);
 
 router.get("/history", requireAuth, async (req: Request, res: Response) => {
   const walletAddress = req.walletAddress!;

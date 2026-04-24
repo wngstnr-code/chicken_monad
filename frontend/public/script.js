@@ -262,6 +262,39 @@ function activateBet(stake, availableBalance) {
   return true;
 }
 
+function calculateRowMultiplierBp(rowIndex) {
+  let multiplierBp = 0;
+  const safeRowIndex = Math.max(0, Math.floor(Number(rowIndex) || 0));
+
+  for (let step = 1; step <= safeRowIndex; step += 1) {
+    multiplierBp += STEP_INCREMENT_BP;
+    if (step % CP_INTERVAL === 0) {
+      multiplierBp = Math.floor((multiplierBp * CP_BONUS_NUM) / CP_BONUS_DEN);
+    }
+  }
+
+  return multiplierBp;
+}
+
+function getCurrentDecayPenaltyBp(now = Date.now()) {
+  if (!bet.active || bet.cashoutWindow || !bet.segmentActive) {
+    return 0;
+  }
+
+  const elapsed = now - bet.segmentStart;
+  const overtime = elapsed - SEGMENT_TIME_MS;
+  if (overtime <= 0) {
+    return 0;
+  }
+
+  return Math.floor((DECAY_BP_PER_SEC * overtime) / 1000);
+}
+
+function getCurrentEffectiveMultiplierBp(now = Date.now()) {
+  const baseMultiplierBp = calculateRowMultiplierBp(position.currentRow);
+  return Math.max(0, baseMultiplierBp - getCurrentDecayPenaltyBp(now));
+}
+
 async function startBet(stake) {
   if (!isFinite(stake) || stake <= 0) return false;
 
@@ -293,9 +326,6 @@ async function startBet(stake) {
 function onPlayerAdvance(newRowIndex) {
   if (!bet.active) return;
 
-  // +0.025x per forward step
-  bet.multiplierBp = Math.max(0, bet.multiplierBp + STEP_INCREMENT_BP);
-
   // Check if this row is a checkpoint (every 40 steps, grass row)
   if (newRowIndex > 0 && newRowIndex % CP_INTERVAL === 0) {
     reachCheckpoint(newRowIndex);
@@ -314,7 +344,7 @@ function reachCheckpoint(rowIndex) {
   bet.cpRowIndex = rowIndex;
 
   // × 1.2 compound bonus
-  bet.multiplierBp = Math.floor((bet.multiplierBp * CP_BONUS_NUM) / CP_BONUS_DEN);
+  bet.multiplierBp = getCurrentEffectiveMultiplierBp();
 
   // Open cashout window, freeze segment timer while at CP
   bet.cashoutWindow = true;
@@ -403,11 +433,11 @@ async function cashOut(reason) {
     return;
   }
 
+  const mult = getCurrentEffectiveMultiplierBp() / 10000;
   bet.active = false;
   stopBetTicker();
   setBetButtonState();
 
-  const mult = bet.multiplierBp / 10000;
   const payout = bet.stake * mult;
   const profit = payout - bet.stake;
   bet.balance += payout;
@@ -440,7 +470,7 @@ async function crashBet(reason) {
       tone: "busy",
       sticky: true,
     });
-    const mult = bet.multiplierBp / 10000;
+    const mult = getCurrentEffectiveMultiplierBp() / 10000;
     const lostStake = bet.stake;
     bet.active = false;
     stopBetTicker();
@@ -486,11 +516,11 @@ async function crashBet(reason) {
     return;
   }
 
+  const mult = getCurrentEffectiveMultiplierBp() / 10000;
   bet.active = false;
   stopBetTicker();
   setBetButtonState();
 
-  const mult = bet.multiplierBp / 10000;
   showBetHud(false);
   showResult({
     type: "crash",
@@ -529,6 +559,7 @@ function tickBet() {
     renderTimer(remaining, true); // "AT CP" mode
     bet.cpStayRemainingMs = remaining;
     bet.isDecaying = false;
+    bet.multiplierBp = getCurrentEffectiveMultiplierBp(now);
     renderBetHud(); // update CP timer row in HUD every tick
     if (remaining <= 0) {
       closeCashoutWindow();
@@ -541,22 +572,26 @@ function tickBet() {
     bet.cpStayRemainingMs = 0;
 
     // --- Decay logic: after segment time is up, -0.1x per second ---
-    if (segElapsed > SEGMENT_TIME_MS) {
+    const decayWasActive = bet.isDecaying;
+    const decayPenaltyBp = getCurrentDecayPenaltyBp(now);
+
+    if (decayPenaltyBp > 0) {
       bet.isDecaying = true;
-      const decayDeltaMs = now - bet.lastDecayTick;
-      const decayBp = Math.floor((DECAY_BP_PER_SEC * decayDeltaMs) / 1000);
-      if (decayBp > 0) {
-        bet.multiplierBp = Math.max(0, bet.multiplierBp - decayBp);
-        bet.lastDecayTick = now;
-        renderBetHud();
-      }
+      bet.multiplierBp = getCurrentEffectiveMultiplierBp(now);
+      bet.lastDecayTick = now;
+      renderBetHud();
     } else {
       bet.isDecaying = false;
+      bet.multiplierBp = getCurrentEffectiveMultiplierBp(now);
       bet.lastDecayTick = now;
+      if (decayWasActive) {
+        renderBetHud();
+      }
     }
   } else {
     bet.isDecaying = false;
     bet.cpStayRemainingMs = 0;
+    bet.multiplierBp = getCurrentEffectiveMultiplierBp(now);
   }
 }
 
@@ -580,57 +615,78 @@ function renderTimer(ms, atCp) {
 }
 
 function renderBetHud() {
-  const mult = bet.multiplierBp / 10000;
+  const effectiveMultiplierBp = getCurrentEffectiveMultiplierBp();
+  const decayPenaltyBp = getCurrentDecayPenaltyBp();
+  const isDecayActive =
+    bet.active && !bet.reconnecting && !bet.cashoutWindow && decayPenaltyBp > 0;
+  const mult = effectiveMultiplierBp / 10000;
   const payout = bet.stake * mult;
+  const headKickerEl = document.querySelector(".bet-hud-kicker");
+  const headLineEl = document.querySelector(".bet-hud-headline");
   const stakeEl = document.getElementById("bet-stake");
   const multEl = document.getElementById("bet-multiplier");
   const payEl = document.getElementById("bet-payout");
-  const cpEl = document.getElementById("bet-cp");
   const scoreCpEl = document.getElementById("score-cp");
+  const activeHudEl = document.getElementById("bet-hud-active");
+  const idleHudEl = document.getElementById("bet-hud-idle");
   const cashoutBtn = document.getElementById("cash-out-btn");
-  const decayRow = document.getElementById("decay-row");
-  const cpTimerRow = document.getElementById("cp-timer-row");
-  const cpTimerEl = document.getElementById("bet-cp-timer");
+  const decayRow = document.getElementById("bet-hud-decay");
+  const decayValueEl = document.getElementById("bet-decay");
+
+  bet.multiplierBp = effectiveMultiplierBp;
+  bet.isDecaying = isDecayActive;
 
   if (stakeEl) stakeEl.innerText = "$" + bet.stake.toFixed(2);
   if (multEl) multEl.innerText = mult.toFixed(2) + "x";
   if (payEl) payEl.innerText = "$" + payout.toFixed(2);
-  if (cpEl) cpEl.innerText = "CP " + bet.currentCp;
   if (scoreCpEl) scoreCpEl.innerText = String(bet.currentCp);
 
-  // Decay indicator
-  if (decayRow) {
-    decayRow.style.display = bet.isDecaying ? "flex" : "none";
+  if (headKickerEl) {
+    headKickerEl.textContent = bet.active ? "Live Bet" : "Run Summary";
   }
-
-  // CP Stay countdown
-  if (cpTimerRow && cpTimerEl) {
-    if (bet.cashoutWindow && bet.cpStayRemainingMs > 0) {
-      cpTimerRow.style.display = "flex";
-      const totalSec = Math.ceil(bet.cpStayRemainingMs / 1000);
-      const m = Math.floor(totalSec / 60);
-      const s = totalSec % 60;
-      cpTimerEl.innerText = `${m}:${s.toString().padStart(2, "0")}`;
-      if (bet.cpStayRemainingMs < 15000) {
-        cpTimerEl.classList.add("cp-timer-urgent");
-      } else {
-        cpTimerEl.classList.remove("cp-timer-urgent");
-      }
+  if (headLineEl) {
+    if (bet.reconnecting) {
+      headLineEl.textContent = "Reconnecting...";
+    } else if (!bet.active) {
+      headLineEl.textContent = "No active bet";
+    } else if (bet.cashoutWindow) {
+      headLineEl.textContent = "Checkpoint window open";
+    } else if (isDecayActive) {
+      headLineEl.textContent = "DECAYING IS ACTIVE";
     } else {
-      cpTimerRow.style.display = "none";
+      headLineEl.textContent = "Run in progress";
     }
   }
 
+  if (activeHudEl) {
+    activeHudEl.style.display = bet.active ? "block" : "none";
+  }
+  if (idleHudEl) {
+    idleHudEl.style.display = bet.active ? "none" : "block";
+  }
+
+  // Decay indicator
+  if (decayRow) {
+    decayRow.hidden = !isDecayActive;
+    decayRow.style.display = isDecayActive ? "flex" : "none";
+  }
+  if (decayValueEl) {
+    decayValueEl.innerText = "-0.1x / sec";
+  }
+
   if (cashoutBtn) {
-    if (bet.reconnecting) {
+    if (!bet.active || bet.reconnecting) {
+      cashoutBtn.style.display = "none";
       cashoutBtn.disabled = true;
       cashoutBtn.classList.add("disabled");
       cashoutBtn.innerText = "RECONNECTING...";
     } else if (canCashOut()) {
+      cashoutBtn.style.display = "block";
       cashoutBtn.disabled = false;
       cashoutBtn.classList.remove("disabled");
       cashoutBtn.innerText = "CASH OUT";
     } else {
+      cashoutBtn.style.display = "none";
       cashoutBtn.disabled = true;
       cashoutBtn.classList.add("disabled");
       cashoutBtn.innerText = "RUN TO NEXT CP";
@@ -645,7 +701,8 @@ function showBetPanel(show) {
 
 function showBetHud(show) {
   const el = document.getElementById("bet-hud");
-  if (el) el.style.display = show ? "block" : "none";
+  if (el) el.style.display = "block";
+  renderBetHud();
 }
 
 function syncPlayerToGrid() {
@@ -682,7 +739,6 @@ function restoreActiveBetFromSnapshot(snapshot) {
   const segmentRemainingMs = Math.max(0, Number(snapshot.segmentRemainingMs) || 0);
   const cpStayRemainingMs = Math.max(0, Number(snapshot.cpStayRemainingMs) || 0);
   const decayBp = Math.max(0, Number(snapshot.decayBp) || 0);
-  const effectiveMultiplierBp = Math.max(0, Math.floor(Number(snapshot.multiplierBp) || 0));
   const now = Date.now();
 
   settlementPending = false;
@@ -702,7 +758,7 @@ function restoreActiveBetFromSnapshot(snapshot) {
     : now - SEGMENT_TIME_MS - Math.floor((decayBp * 1000) / DECAY_BP_PER_SEC);
   bet.lastDecayTick = now;
   bet.isDecaying = !cashoutWindow && decayBp > 0;
-  bet.multiplierBp = effectiveMultiplierBp;
+  bet.multiplierBp = getCurrentEffectiveMultiplierBp(now);
 
   movesQueue.length = 0;
   if (moveClock.running) moveClock.stop();
@@ -1400,9 +1456,25 @@ function stepCompleted() {
   if (position.currentRow > metadata.length - 10) addRows();
 
   // Track multiplier for bet mode — only count NEW rows (anti-exploit)
-  if (bet.active && position.currentRow > bet.maxRow) {
-    bet.maxRow = position.currentRow;
-    onPlayerAdvance(position.currentRow);
+  if (bet.active) {
+    if (direction === "forward") {
+      if (position.currentRow > bet.maxRow) {
+        bet.maxRow = position.currentRow;
+        onPlayerAdvance(position.currentRow);
+      } else {
+        if (bet.cashoutWindow && position.currentRow > bet.cpRowIndex) {
+          closeCashoutWindow();
+        }
+        renderBetHud();
+      }
+    } else if (direction === "backward") {
+      if (bet.cashoutWindow && position.currentRow !== bet.cpRowIndex) {
+        closeCashoutWindow();
+      }
+      renderBetHud();
+    } else {
+      renderBetHud();
+    }
   }
 
   const scoreDOM = document.getElementById("score");
@@ -2005,13 +2077,13 @@ function initBettingUI() {
   const depositVaultLocked = document.getElementById("deposit-vault-locked");
   const depositAllowance = document.getElementById("deposit-allowance");
   const leaderboardBtn = document.getElementById("leaderboard-btn");
-  const leaderboardPanel = document.getElementById("leaderboard-panel");
+  const leaderboardModal = document.getElementById("leaderboard-modal");
   const leaderboardRefresh = document.getElementById("leaderboard-refresh");
   const leaderboardStatus = document.getElementById("leaderboard-status");
   const leaderboardYourRank = document.getElementById("leaderboard-your-rank");
   const leaderboardList = document.getElementById("leaderboard-list");
   const statsBtn = document.getElementById("stats-btn");
-  const statsPanel = document.getElementById("stats-panel");
+  const statsModal = document.getElementById("stats-modal");
   const statsRefresh = document.getElementById("stats-refresh");
   const statsStatus = document.getElementById("stats-status");
   const statsTotalGames = document.getElementById("stats-total-games");
@@ -2350,7 +2422,7 @@ function initBettingUI() {
   }
 
   async function refreshLeaderboard(forceReload = false) {
-    if (!leaderboardPanel) return;
+    if (!document.getElementById("leaderboard-modal")) return;
     if (leaderboardBusy) return;
 
     const hasFreshCache =
@@ -2432,33 +2504,36 @@ function initBettingUI() {
     }
   }
 
-  function openLeaderboardPanel() {
-    if (!leaderboardPanel) return;
-    closeStatsPanel();
-    leaderboardPanel.style.display = "block";
-    leaderboardPanel.setAttribute("aria-hidden", "false");
+  function openLeaderboardModal() {
+    const el = document.getElementById("leaderboard-modal");
+    if (!el) return;
+    closeStatsModal();
+    el.style.display = "flex";
+    el.setAttribute("aria-hidden", "false");
     leaderboardBtn?.classList.add("open");
     leaderboardBtn?.setAttribute("aria-expanded", "true");
     void refreshLeaderboard();
   }
 
-  function closeLeaderboardPanel() {
-    if (!leaderboardPanel) return;
-    leaderboardPanel.style.display = "none";
-    leaderboardPanel.setAttribute("aria-hidden", "true");
+  function closeLeaderboardModal() {
+    const el = document.getElementById("leaderboard-modal");
+    if (!el) return;
+    el.style.display = "none";
+    el.setAttribute("aria-hidden", "true");
     leaderboardBtn?.classList.remove("open");
     leaderboardBtn?.setAttribute("aria-expanded", "false");
   }
 
-  function toggleLeaderboardPanel() {
-    if (!leaderboardPanel) return;
-    const isVisible = leaderboardPanel.style.display !== "none";
-    if (isVisible) closeLeaderboardPanel();
-    else openLeaderboardPanel();
+  function toggleLeaderboardModal() {
+    const el = document.getElementById("leaderboard-modal");
+    if (!el) return;
+    const isVisible = el.style.display !== "none";
+    if (isVisible) closeLeaderboardModal();
+    else openLeaderboardModal();
   }
 
   async function refreshStats(forceReload = false) {
-    if (!statsPanel) return;
+    if (!document.getElementById("stats-modal")) return;
     if (statsBusy) return;
 
     const bridge = hasLiveBridge() ? getBridge() : null;
@@ -2543,29 +2618,31 @@ function initBettingUI() {
     }
   }
 
-  function openStatsPanel() {
-    if (!statsPanel) return;
-    closeLeaderboardPanel();
-    statsPanel.style.display = "block";
-    statsPanel.setAttribute("aria-hidden", "false");
+  function openStatsModal() {
+    const el = document.getElementById("stats-modal");
+    if (!el) return;
+    closeLeaderboardModal();
+    el.style.display = "flex";
+    el.setAttribute("aria-hidden", "false");
     statsBtn?.classList.add("open");
     statsBtn?.setAttribute("aria-expanded", "true");
     void refreshStats();
   }
 
-  function closeStatsPanel() {
-    if (!statsPanel) return;
-    statsPanel.style.display = "none";
-    statsPanel.setAttribute("aria-hidden", "true");
+  function closeStatsModal() {
+    if (!statsModal) return;
+    statsModal.style.display = "none";
+    statsModal.setAttribute("aria-hidden", "true");
     statsBtn?.classList.remove("open");
     statsBtn?.setAttribute("aria-expanded", "false");
   }
 
-  function toggleStatsPanel() {
-    if (!statsPanel) return;
-    const isVisible = statsPanel.style.display !== "none";
-    if (isVisible) closeStatsPanel();
-    else openStatsPanel();
+  function toggleStatsModal() {
+    const el = document.getElementById("stats-modal");
+    if (!el) return;
+    const isVisible = el.style.display !== "none";
+    if (isVisible) closeStatsModal();
+    else openStatsModal();
   }
 
   function setDepositBalanceCard(snapshot) {
@@ -2668,12 +2745,22 @@ function initBettingUI() {
     openDepositModal(presetAmount);
   });
 
+  window.addEventListener("chicken:open-leaderboard", () => {
+    console.log("script.js: received chicken:open-leaderboard event");
+    openLeaderboardModal();
+  });
+
+  window.addEventListener("chicken:open-stats", () => {
+    console.log("script.js: received chicken:open-stats event");
+    openStatsModal();
+  });
+
   leaderboardBtn?.addEventListener("click", () => {
-    toggleLeaderboardPanel();
+    toggleLeaderboardModal();
   });
 
   statsBtn?.addEventListener("click", () => {
-    toggleStatsPanel();
+    toggleStatsModal();
   });
 
   statsTabButtons.forEach((button) => {
@@ -2687,27 +2774,27 @@ function initBettingUI() {
     if (!(target instanceof Node)) return;
 
     const leaderboardVisible =
-      leaderboardPanel &&
+      leaderboardModal &&
       leaderboardBtn &&
-      leaderboardPanel.style.display !== "none";
+      leaderboardModal.style.display !== "none";
     if (
       leaderboardVisible &&
-      !leaderboardPanel.contains(target) &&
+      !leaderboardModal.contains(target) &&
       !leaderboardBtn.contains(target)
     ) {
-      closeLeaderboardPanel();
+      closeLeaderboardModal();
     }
 
     const statsVisible =
-      statsPanel &&
+      statsModal &&
       statsBtn &&
-      statsPanel.style.display !== "none";
+      statsModal.style.display !== "none";
     if (
       statsVisible &&
-      !statsPanel.contains(target) &&
+      !statsModal.contains(target) &&
       !statsBtn.contains(target)
     ) {
-      closeStatsPanel();
+      closeStatsModal();
     }
   });
 
@@ -2738,8 +2825,8 @@ function initBettingUI() {
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closeGameHelpModal();
-      closeLeaderboardPanel();
-      closeStatsPanel();
+      closeLeaderboardModal();
+      closeStatsModal();
     }
   });
 
@@ -3151,6 +3238,22 @@ function initBettingUI() {
       durationMs: 3200,
     });
     showErrorToast("⏰ " + msg);
+  });
+
+  document.getElementById("leaderboard-close-btn")?.addEventListener("click", () => {
+    closeLeaderboardModal();
+  });
+
+  document.getElementById("stats-close-btn")?.addEventListener("click", () => {
+    closeStatsModal();
+  });
+
+  document.getElementById("leaderboard-modal")?.addEventListener("click", (e) => {
+    if (e.target.id === "leaderboard-modal") closeLeaderboardModal();
+  });
+
+  document.getElementById("stats-modal")?.addEventListener("click", (e) => {
+    if (e.target.id === "stats-modal") closeStatsModal();
   });
 }
 

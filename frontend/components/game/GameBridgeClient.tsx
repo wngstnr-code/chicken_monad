@@ -9,6 +9,7 @@ import {
   waitForTransactionReceipt,
   writeContract,
 } from "@wagmi/core";
+import { useConfig } from "wagmi";
 import { useWallet } from "../web3/WalletProvider";
 import { backendPost, backendFetch } from "../../lib/backend/api";
 import { BACKEND_API_URL, hasBackendApiConfig } from "../../lib/backend/config";
@@ -29,7 +30,6 @@ import {
   USDC_FAUCET_ADDRESS,
   hasGameContractConfig,
 } from "../../lib/web3/contracts";
-import { wagmiConfig } from "../../lib/web3/wagmiConfig";
 
 type GameBridgeClientProps = {
   backgroundMode?: boolean;
@@ -70,6 +70,16 @@ type ReconnectedPayload = {
   cpStayRemainingMs: number;
   decayBp: number;
   serverTime: number;
+};
+
+type ActiveBackendSessionPayload = {
+  hasActiveGame: boolean;
+  session?: {
+    session_id?: string;
+    onchain_session_id?: string;
+    stake_amount?: number | string;
+    created_at?: string;
+  } | null;
 };
 
 type PendingResolver<T> = {
@@ -157,9 +167,11 @@ function rejectPendingRequest<T>(
 export function GameBridgeClient({
   backgroundMode = false,
 }: GameBridgeClientProps) {
+  const wagmiConfig = useConfig();
   const {
     account,
     isMonadChain,
+    isBackendAuthenticated,
     hasBackendApiConfig: hasBackendConfig,
     ensureBackendSession,
     refreshBackendSession,
@@ -174,6 +186,18 @@ export function GameBridgeClient({
     null,
   );
   const reconnectTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (backgroundMode) return;
+
+    document.documentElement.classList.add("play-scroll-lock");
+    document.body.classList.add("play-scroll-lock");
+
+    return () => {
+      document.documentElement.classList.remove("play-scroll-lock");
+      document.body.classList.remove("play-scroll-lock");
+    };
+  }, [backgroundMode]);
 
   useEffect(() => {
     if (backgroundMode) {
@@ -233,6 +257,8 @@ export function GameBridgeClient({
         },
         crash: async () => null,
         autoSettlePending: async () => false,
+        getPlayBlocker: async () => ({ kind: "none" }),
+        resolvePlayBlocker: async () => false,
       };
 
       return () => {
@@ -260,12 +286,13 @@ export function GameBridgeClient({
 
         pendingStartRef.current = null;
         window.clearTimeout(pending.timeoutId);
+        emitPlayBlocker({ kind: "none" });
         pending.resolve(payload);
       });
 
       socket.on("game:reconnected", (payload: ReconnectedPayload) => {
         const expectedSessionId = activeSessionIdRef.current;
-        if (!expectedSessionId || payload.sessionId !== expectedSessionId) {
+        if (expectedSessionId && payload.sessionId !== expectedSessionId) {
           return;
         }
 
@@ -274,7 +301,10 @@ export function GameBridgeClient({
           reconnectTimeoutRef.current = null;
         }
 
+        // After a browser refresh we may not have local sessionId anymore,
+        // but backend can still restore the paused run for this wallet.
         activeSessionIdRef.current = payload.sessionId;
+        emitPlayBlocker({ kind: "none" });
         window.dispatchEvent(
           new CustomEvent("chicken:game-reconnected", {
             detail: payload,
@@ -305,6 +335,7 @@ export function GameBridgeClient({
         const message =
           payload?.message ||
           "Transaksi startSession gagal/revert. Silakan start bet ulang.";
+        void refreshPlayBlockerStatus();
         window.dispatchEvent(
           new CustomEvent("chicken:start-bet-failed", {
             detail: { message },
@@ -547,6 +578,24 @@ export function GameBridgeClient({
       return String(value || "");
     }
 
+    function isZeroSessionId(value: string) {
+      return !value || value.toLowerCase() === ZERO_BYTES32;
+    }
+
+    function shortSessionId(value?: string | null) {
+      const normalized = String(value || "");
+      if (!normalized) return "";
+      return `${normalized.slice(0, 10)}...`;
+    }
+
+    function emitPlayBlocker(blocker: ChickenBridgePlayBlocker) {
+      window.dispatchEvent(
+        new CustomEvent("chicken:play-blocker", {
+          detail: blocker,
+        }),
+      );
+    }
+
     async function readWalletUsdcBalance(address: Address) {
       const value = await readContract(wagmiConfig, {
         address: USDC_ADDRESS as Address,
@@ -577,6 +626,18 @@ export function GameBridgeClient({
       return txHash as string;
     }
 
+    async function fetchActiveBackendSession() {
+      try {
+        return await backendFetch<ActiveBackendSessionPayload>("/api/game/active");
+      } catch (err) {
+        console.error("❌ Gagal fetch active session:", err);
+        return {
+          hasActiveGame: false,
+          session: null,
+        };
+      }
+    }
+
     async function fetchPendingSettlements() {
       try {
         return await backendFetch<{
@@ -590,6 +651,79 @@ export function GameBridgeClient({
           pendingSettlements: [],
         };
       }
+    }
+
+    async function getPlayBlocker(): Promise<ChickenBridgePlayBlocker> {
+      if (
+        !account ||
+        !isAddress(account) ||
+        !isMonadChain ||
+        !hasGameContractConfig() ||
+        !hasBackendConfig
+      ) {
+        return { kind: "none" };
+      }
+
+      const authOkay =
+        isBackendAuthenticated || (await refreshBackendSession());
+      if (!authOkay) {
+        return { kind: "none" };
+      }
+
+      const playerAddress = account as Address;
+      const [pending, activeBackendSession, activeSessionId] =
+        await Promise.all([
+          fetchPendingSettlements(),
+          fetchActiveBackendSession(),
+          readActiveSessionId(playerAddress),
+        ]);
+
+      if (pending.hasPending && pending.pendingSettlements.length > 0) {
+        const pendingCount = pending.pendingSettlements.length;
+        const firstPending = pending.pendingSettlements[0];
+        return {
+          kind: "pending_settlement",
+          message:
+            pendingCount > 1
+              ? `${pendingCount} PREV BETS NEED SETTLEMENT`
+              : "PREV BET NEEDS SETTLEMENT",
+          actionLabel: "END NOW",
+          onchainSessionId: String(
+            firstPending?.onchain_session_id ||
+              firstPending?.resolution?.sessionId ||
+              "",
+          ),
+          pendingCount,
+        };
+      }
+
+      if (!isZeroSessionId(activeSessionId)) {
+        return {
+          kind: "active_previous",
+          message: "PREV BET STILL NOT END",
+          actionLabel: "END NOW",
+          onchainSessionId: activeSessionId,
+        };
+      }
+
+      if (activeBackendSession.hasActiveGame) {
+        return {
+          kind: "active_previous",
+          message: "PREV BET STILL NOT END",
+          actionLabel: "END NOW",
+          onchainSessionId: String(
+            activeBackendSession.session?.onchain_session_id || "",
+          ),
+        };
+      }
+
+      return { kind: "none" };
+    }
+
+    async function refreshPlayBlockerStatus() {
+      const blocker = await getPlayBlocker();
+      emitPlayBlocker(blocker);
+      return blocker;
     }
 
     async function settlePendingSettlements(
@@ -929,6 +1063,7 @@ export function GameBridgeClient({
         const pending = await fetchPendingSettlements();
 
         if (!pending.hasPending || pending.pendingSettlements.length === 0) {
+          await refreshPlayBlockerStatus();
           return false;
         }
 
@@ -936,7 +1071,59 @@ export function GameBridgeClient({
           `🧹 Auto-settling ${pending.pendingSettlements.length} pending session(s)...`,
         );
 
-        return settlePendingSettlements(pending.pendingSettlements);
+        const didSettle = await settlePendingSettlements(
+          pending.pendingSettlements,
+        );
+        await refreshPlayBlockerStatus();
+        return didSettle;
+      },
+      getPlayBlocker: async () => {
+        const blocker = await getPlayBlocker();
+        emitPlayBlocker(blocker);
+        return blocker;
+      },
+      resolvePlayBlocker: async () => {
+        const playerAddress = await requireReadyGameWallet();
+        const blocker = await getPlayBlocker();
+
+        if (blocker.kind === "none") {
+          emitPlayBlocker(blocker);
+          return false;
+        }
+
+        if (blocker.kind === "pending_settlement") {
+          const pending = await fetchPendingSettlements();
+          if (pending.hasPending && pending.pendingSettlements.length > 0) {
+            await settlePendingSettlements(pending.pendingSettlements, {
+              targetOnchainSessionId: blocker.onchainSessionId,
+            });
+          }
+        } else {
+          emitDepositProgress("settle_sign", "Ending previous bet...");
+          await backendPost<{
+            success: boolean;
+            resolved?: boolean;
+          }>("/api/game/force-end-active");
+
+          const pending = await fetchPendingSettlements();
+          if (pending.hasPending && pending.pendingSettlements.length > 0) {
+            await settlePendingSettlements(pending.pendingSettlements, {
+              targetOnchainSessionId: blocker.onchainSessionId,
+            });
+          }
+
+          const refreshedActiveSessionId = await readActiveSessionId(
+            playerAddress,
+          );
+          if (!isZeroSessionId(refreshedActiveSessionId)) {
+            throw new Error(
+              `Masih ada session onchain lama yang aktif (${shortSessionId(refreshedActiveSessionId)}). Coba lagi sebentar.`,
+            );
+          }
+        }
+
+        const refreshedBlocker = await refreshPlayBlockerStatus();
+        return refreshedBlocker.kind === "none";
       },
       startBet: async (stake: number) => {
         const playerAddress = await requireReadyGameWallet();
@@ -961,19 +1148,14 @@ export function GameBridgeClient({
         }
 
         const stakeAmountUnits = parseUnits(String(stake), USDC_DECIMALS);
-        const [availableBalanceUnits, activeSessionId] = await Promise.all([
+        const [availableBalanceUnits, blocker] = await Promise.all([
           readContract(wagmiConfig, {
             address: GAME_VAULT_ADDRESS as Address,
             abi: GAME_VAULT_ABI,
             functionName: "availableBalanceOf",
             args: [playerAddress],
           }) as Promise<bigint>,
-          readContract(wagmiConfig, {
-            address: GAME_SETTLEMENT_ADDRESS as Address,
-            abi: GAME_SETTLEMENT_ABI,
-            functionName: "activeSessionOf",
-            args: [playerAddress],
-          }) as Promise<`0x${string}`>,
+          getPlayBlocker(),
         ]);
 
         if (availableBalanceUnits < stakeAmountUnits) {
@@ -982,27 +1164,15 @@ export function GameBridgeClient({
           );
         }
 
-        if (
-          typeof activeSessionId === "string" &&
-          activeSessionId.toLowerCase() !== ZERO_BYTES32
-        ) {
-          const pending = await fetchPendingSettlements();
-
-          if (pending.hasPending && pending.pendingSettlements.length > 0) {
-            await settlePendingSettlements(pending.pendingSettlements, {
-              targetOnchainSessionId: activeSessionId,
-            });
-          }
-
-          const refreshedActiveSessionId = await readActiveSessionId(playerAddress);
-          if (
-            typeof refreshedActiveSessionId === "string" &&
-            refreshedActiveSessionId.toLowerCase() !== ZERO_BYTES32
-          ) {
-            throw new Error(
-              `Masih ada session onchain lama yang aktif (${refreshedActiveSessionId.slice(0, 10)}...). Selesaikan settlement session itu dulu sebelum start bet baru.`,
-            );
-          }
+        if (blocker.kind !== "none") {
+          emitPlayBlocker(blocker);
+          throw new Error(
+            blocker.kind === "pending_settlement"
+              ? "Prev bet masih butuh settlement. Klik END NOW dulu sebelum start bet baru."
+              : blocker.onchainSessionId
+                ? `Masih ada session onchain lama yang aktif (${shortSessionId(blocker.onchainSessionId)}). Klik END NOW dulu sebelum start bet baru.`
+                : "Prev bet masih belum selesai. Klik END NOW dulu sebelum start bet baru.",
+          );
         }
 
         const socket = ensureSocket();
@@ -1110,6 +1280,7 @@ export function GameBridgeClient({
             args: [resolution, signature as `0x${string}`],
           });
         } catch (error) {
+          void refreshPlayBlockerStatus();
           throw new Error(
             toUserFacingWalletError(error, "Transaksi cash out gagal.", {
               userRejectedMessage: "Cash out dibatalkan di wallet.",
@@ -1123,6 +1294,7 @@ export function GameBridgeClient({
         });
 
         activeSessionIdRef.current = "";
+        await refreshPlayBlockerStatus();
         return {
           sessionId: payload.sessionId,
           onchainSessionId: payload.onchainSessionId,
@@ -1163,6 +1335,7 @@ export function GameBridgeClient({
             args: [resolution, signature as `0x${string}`],
           });
         } catch (error) {
+          void refreshPlayBlockerStatus();
           throw new Error(
             toUserFacingWalletError(error, "Settlement run gagal.", {
               userRejectedMessage: "Settlement run dibatalkan di wallet.",
@@ -1175,6 +1348,7 @@ export function GameBridgeClient({
           txHash,
         });
 
+        await refreshPlayBlockerStatus();
         return {
           sessionId: payload.sessionId,
           onchainSessionId: payload.onchainSessionId,
@@ -1189,6 +1363,8 @@ export function GameBridgeClient({
         };
       },
     };
+
+    void refreshPlayBlockerStatus();
 
     return () => {
       pendingStartRef.current = null;
@@ -1208,6 +1384,7 @@ export function GameBridgeClient({
     account,
     backgroundMode,
     ensureBackendSession,
+    isBackendAuthenticated,
     hasBackendConfig,
     isMonadChain,
     refreshBackendSession,

@@ -132,18 +132,7 @@ canvas.game {
    BET HUD — shown during active bet
 ============================================================ */
 
-#bet-hud {
-  position: absolute;
-  top: 120px;
-  right: 20px;
-  width: 220px;
-  background: linear-gradient(180deg, #1a1d2e 0%, #262b45 100%);
-  border: 3px solid #ffe066;
-  border-radius: 14px;
-  padding: 16px;
-  box-shadow: 4px 6px 0 rgba(0, 0, 0, 0.5);
-  z-index: 10;
-}
+
 
 .hud-row {
   display: flex;
@@ -865,13 +854,7 @@ canvas.game {
     display: none; /* hide in mobile, bet-cp shows it */
   }
 
-  #bet-hud {
-    top: auto;
-    bottom: 150px;
-    right: 10px;
-    width: 150px;
-    padding: 10px;
-  }
+
 
   .hud-row {
     font-size: 9px;
@@ -1037,10 +1020,7 @@ canvas.game {
     padding: 0 8px;
   }
 
-  #bet-hud {
-    width: 130px;
-    bottom: 140px;
-  }
+
 }
 
 @media (orientation: landscape) and (max-height: 500px) {
@@ -1048,10 +1028,7 @@ canvas.game {
     top: 6px;
   }
 
-  #bet-hud {
-    top: 70px;
-    bottom: auto;
-  }
+
 
   #controls {
     bottom: 10px;
@@ -1197,9 +1174,15 @@ canvas.game {
   text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.45);
 }
 
+.tab-buttons-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
 #leaderboard-btn,
 #stats-btn {
-  width: 100%;
+  flex: 1;
   height: 40px;
   min-height: 40px;
   box-sizing: border-box;
@@ -1212,7 +1195,7 @@ canvas.game {
   box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.35);
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   transition: transform 0.05s ease, box-shadow 0.05s ease;
 }
 
@@ -1232,7 +1215,6 @@ canvas.game {
 .stats-btn-label {
   flex: 1;
   text-align: center;
-  padding-left: 18px;
 }
 
 .leaderboard-btn-label {
@@ -1268,24 +1250,33 @@ canvas.game {
   box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.35);
 }
 
-#leaderboard-panel,
-#stats-panel {
-  position: relative;
+#leaderboard-modal.modal-bg,
+#stats-modal.modal-bg {
+  /* Inherits centering from .modal-bg */
+}
+
+.leaderboard-modal-box {
+  background: #fdf6e3;
+  border: 4px solid #2c3e50;
+  border-radius: 24px;
+  padding: 40px 32px 32px;
+  max-width: 420px;
   width: 100%;
-  border-radius: 14px;
-  background: linear-gradient(180deg, rgba(12, 20, 38, 0.93) 0%, rgba(21, 32, 58, 0.94) 100%);
-  box-shadow: 4px 6px 0 rgba(0, 0, 0, 0.45);
-  z-index: 23;
-  padding: 12px;
-  box-sizing: border-box;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 10px 12px 0 rgba(0, 0, 0, 0.2);
 }
 
-#leaderboard-panel {
-  border: 2px solid #2d5874;
-}
-
-#stats-panel {
-  border: 2px solid #8a6a24;
+.stats-modal-box {
+  background: #fdf6e3;
+  border: 4px solid #2c3e50;
+  border-radius: 24px;
+  padding: 40px 32px 32px;
+  max-width: 420px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 10px 12px 0 rgba(0, 0, 0, 0.2);
 }
 
 .leaderboard-panel-head {
@@ -1295,44 +1286,47 @@ canvas.game {
 
 .leaderboard-panel-head h3 {
   margin: 0;
-  font-size: 9px;
+  font-family: "Press Start 2P", cursive;
+  font-size: 18px;
   letter-spacing: 1px;
-  color: rgba(214, 236, 255, 0.82);
+  color: #2c3e50;
   text-align: center;
 }
 
 .leaderboard-status {
-  margin: 0 0 8px;
-  color: rgba(223, 238, 255, 0.78);
-  font-size: 8px;
+  margin: 0 0 12px;
+  color: #4b6584;
+  font-size: 10px;
   line-height: 1.5;
   text-align: center;
 }
 
 .leaderboard-status.error {
-  color: #ff8e8e;
+  color: #d63636;
 }
 
 .leaderboard-self-card {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border: 1px dashed rgba(184, 212, 255, 0.4);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
-  padding: 8px 10px;
-  margin-bottom: 8px;
+  border: 2px solid rgba(44, 62, 80, 0.15);
+  border-radius: 14px;
+  background: rgba(44, 62, 80, 0.05);
+  padding: 10px 14px;
+  margin-bottom: 12px;
 }
 
 .leaderboard-self-card span {
+  font-family: "Press Start 2P", cursive;
   font-size: 8px;
-  color: rgba(219, 236, 255, 0.74);
-  letter-spacing: 1px;
+  color: #4b6584;
+  letter-spacing: 0.5px;
 }
 
 .leaderboard-self-card strong {
+  font-family: "Press Start 2P", cursive;
   font-size: 10px;
-  color: #ffe066;
+  color: #2c3e50;
 }
 
 .leaderboard-list {
@@ -1347,30 +1341,34 @@ canvas.game {
 .leaderboard-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  padding: 7px 9px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #fff;
+  padding: 10px 14px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 .leaderboard-rank {
-  color: #ffe066;
-  font-size: 8px;
+  color: #2c3e50;
+  font-family: "Press Start 2P", cursive;
+  font-size: 9px;
 }
 
 .leaderboard-wallet {
-  color: #f3f8ff;
-  font-size: 8px;
+  color: #2c3e50;
+  font-size: 10px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .leaderboard-score {
-  color: #87f3ca;
-  font-size: 8px;
+  color: #10ac84;
+  font-family: "Press Start 2P", cursive;
+  font-size: 9px;
 }
 
 #leaderboard-refresh,
@@ -1413,43 +1411,45 @@ canvas.game {
 }
 
 .stats-summary-card {
-  border-radius: 10px;
-  border: 1px dashed rgba(255, 223, 158, 0.32);
-  background: rgba(255, 214, 122, 0.08);
-  padding: 8px 9px;
+  border-radius: 14px;
+  border: 2px solid rgba(44, 62, 80, 0.15);
+  background: rgba(44, 62, 80, 0.04);
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
 }
 
 .stats-summary-card span {
+  font-family: "Press Start 2P", cursive;
   font-size: 7px;
-  letter-spacing: 1px;
-  color: rgba(249, 233, 192, 0.76);
+  letter-spacing: 0.5px;
+  color: #4b6584;
 }
 
 .stats-summary-card strong {
-  font-size: 10px;
-  color: #fff3bf;
+  font-family: "Press Start 2P", cursive;
+  font-size: 11px;
+  color: #2c3e50;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .stats-summary-card strong.negative {
-  color: #ff9a9a;
+  color: #d63636;
 }
 
 .stats-summary-card strong.positive {
-  color: #93f2c8;
+  color: #10ac84;
 }
 
 .stats-joined {
-  margin: 0 0 8px;
-  font-size: 8px;
+  margin: 0 0 12px;
+  font-size: 9px;
   line-height: 1.5;
-  color: rgba(255, 240, 212, 0.76);
+  color: #7f8c8d;
   text-align: center;
 }
 
@@ -1461,23 +1461,24 @@ canvas.game {
 }
 
 .stats-tabs button {
-  min-height: 30px;
-  border-radius: 9px;
-  border: 1px solid rgba(255, 214, 122, 0.4);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 243, 214, 0.76);
-  font-family: inherit;
-  font-size: 8px;
-  letter-spacing: 1px;
+  min-height: 38px;
+  border-radius: 12px;
+  border: 2px solid rgba(44, 62, 80, 0.15);
+  background: #fff;
+  color: #7f8c8d;
+  font-family: "Press Start 2P", cursive;
+  font-size: 9px;
+  letter-spacing: 0.5px;
   cursor: pointer;
   transition: transform 0.05s ease, box-shadow 0.05s ease, background 0.12s ease;
+  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.1);
 }
 
 .stats-tabs button.active {
-  border-color: #d69a36;
-  background: linear-gradient(180deg, rgba(255, 214, 122, 0.95) 0%, rgba(223, 154, 50, 0.92) 100%);
-  color: #412604;
-  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.28);
+  border-color: #7c5514;
+  background: linear-gradient(180deg, #ffe29c 0%, #f3b848 100%);
+  color: #452b05;
+  box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.2);
 }
 
 .stats-tabs button:active {
@@ -1494,27 +1495,29 @@ canvas.game {
 .stats-empty {
   margin: 0;
   min-height: 104px;
-  border: 1px dashed rgba(255, 214, 122, 0.28);
-  border-radius: 10px;
+  border: 2px dashed rgba(44, 62, 80, 0.15);
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 12px;
+  padding: 16px;
   box-sizing: border-box;
-  color: rgba(255, 240, 212, 0.72);
+  color: #7f8c8d;
+  font-family: "Press Start 2P", cursive;
   font-size: 8px;
-  line-height: 1.7;
+  line-height: 1.8;
 }
 
 .stats-row {
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  padding: 8px 9px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #fff;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 .stats-row-top,
@@ -1522,17 +1525,18 @@ canvas.game {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
 
 .stats-row-top {
-  font-size: 7px;
-  color: rgba(223, 238, 255, 0.72);
+  font-size: 8px;
+  color: #7f8c8d;
 }
 
 .stats-row-bottom {
-  font-size: 8px;
-  color: #f5f8ff;
+  font-size: 10px;
+  color: #2c3e50;
+  font-weight: 600;
 }
 
 .stats-row-meta {
@@ -1583,27 +1587,30 @@ canvas.game {
 
 .stats-row-date,
 .stats-row-subtle {
-  color: rgba(223, 238, 255, 0.62);
+  color: #7f8c8d;
 }
 
 .stats-row-subtle {
-  font-size: 7px;
+  font-size: 8px;
 }
 
 .stats-row-main {
-  color: #ffffff;
+  color: #2c3e50;
+  font-weight: 700;
 }
 
 .stats-row-value {
-  color: #ffe39e;
+  color: #2c3e50;
+  font-family: "Press Start 2P", cursive;
+  font-size: 9px;
 }
 
 .stats-row-value.positive {
-  color: #93f2c8;
+  color: #10ac84;
 }
 
 .stats-row-value.negative {
-  color: #ff9a9a;
+  color: #d63636;
 }
 
 #bet-btn {
@@ -1636,20 +1643,125 @@ canvas.game {
 }
 
 #bet-hud {
-  top: var(--play-nav-hud-offset, 180px);
-  bottom: auto;
-  right: 18px;
-  width: 236px;
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
   z-index: 22;
-  border-radius: 16px;
-  border-width: 2px;
-  border-color: #b8d4ff;
-  background: linear-gradient(180deg, rgba(16, 24, 44, 0.9) 0%, rgba(25, 34, 60, 0.9) 100%);
+  border-radius: 14px;
+  border: 2px solid rgba(184, 212, 255, 0.9);
+  background:
+    linear-gradient(140deg, rgba(255, 255, 255, 0.05) 0%, transparent 38%),
+    linear-gradient(180deg, rgba(16, 24, 44, 0.94) 0%, rgba(30, 42, 72, 0.94) 100%);
+  box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.4);
+  color: #edf5ff;
+  overflow: hidden;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
 }
 
 .hud-row {
   padding: 7px 0;
   border-bottom-color: rgba(255, 255, 255, 0.18);
+}
+
+.bet-hud-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 6px 5px;
+  border-radius: 10px;
+  border: 1px solid rgba(184, 212, 255, 0.2);
+  background: rgba(9, 15, 29, 0.34);
+  box-sizing: border-box;
+}
+
+.bet-hud-metric-primary {
+  min-height: 58px;
+}
+
+.bet-hud-metric-wide {
+  grid-column: 1 / -1;
+  align-items: center;
+  text-align: center;
+  padding-top: 9px;
+  padding-bottom: 10px;
+}
+
+.bet-hud-metric-label {
+  font-size: 9px;
+  letter-spacing: 1px;
+  font-weight: 700;
+  color: rgba(224, 237, 255, 0.78);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.bet-hud-metric-value {
+  font-size: 18px;
+  line-height: 1.05;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+}
+
+.bet-hud-metric-value.payout-value,
+.bet-hud-metric-value.multiplier-value {
+  color: #ffe066;
+}
+
+.bet-hud-metric-value.multiplier-value {
+  font-size: 18px;
+}
+
+.bet-hud-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  padding: 8px 10px 6px;
+  border-bottom: 2px solid rgba(184, 212, 255, 0.45);
+}
+
+.bet-hud-headline {
+  font-size: 9px;
+  line-height: 1.25;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.45);
+}
+
+.bet-hud-active {
+  padding: 8px;
+}
+
+.bet-hud-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.bet-hud-decay {
+  margin-top: 6px;
+  padding: 6px 10px 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+}
+
+.bet-hud-idle {
+  padding: 12px 10px 10px;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  line-height: 1.5;
+  font-weight: 700;
+  color: #dfe8ff;
 }
 
 .decay-label,
@@ -1721,12 +1833,22 @@ canvas.game {
 }
 
 .modal-bg {
-  background: rgba(4, 8, 20, 0.62);
-  backdrop-filter: blur(5px);
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  display: flex; /* Remove !important here */
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(4, 8, 20, 0.62) !important;
+  backdrop-filter: blur(8px) !important;
+  z-index: 9999 !important;
+  padding: 20px !important;
+  box-sizing: border-box !important;
 }
 
 .modal-box {
-  width: min(460px, calc(100vw - 28px));
   border-radius: 20px;
   border-width: 3px;
   box-shadow: 8px 10px 0 rgba(0, 0, 0, 0.36);
@@ -1901,7 +2023,12 @@ canvas.game {
   box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35);
 }
 
-.play-nav a {
+.play-menu-container {
+  position: relative;
+  display: flex;
+}
+
+.play-menu-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1911,11 +2038,213 @@ canvas.game {
   box-sizing: border-box;
   border-radius: 12px;
   text-decoration: none;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 1px;
+  cursor: pointer;
   color: #112214;
   border: 2px solid #2d5339;
   background: linear-gradient(180deg, #dfffd7 0%, #97e7a2 100%);
   box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.4);
+  transition: transform 0.05s ease, box-shadow 0.05s ease;
 }
+
+.play-menu-trigger:active,
+.play-menu-trigger.active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.4);
+}
+
+.play-menu-popover {
+  width: 140px;
+  left: auto;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.play-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 34px;
+  min-height: 34px;
+  border-radius: 10px;
+  text-decoration: none;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  box-sizing: border-box;
+  border: 1px solid rgba(184, 212, 255, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+  color: #edf5ff;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.play-menu-item:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.play-menu-item.logout {
+  margin-top: 2px;
+}
+
+.play-menu-separator {
+  height: 1px;
+  width: 100%;
+  background: rgba(184, 212, 255, 0.15);
+  margin: 2px 0;
+}
+
+.play-menu-modal {
+  /* Inherits centering from .modal-bg */
+}
+
+.play-menu-box {
+  background: #fdf6e3;
+  border: 4px solid #2c3e50;
+  border-radius: 24px;
+  padding: 40px 32px 32px;
+  max-width: 420px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  position: relative;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 10px 12px 0 rgba(0, 0, 0, 0.2);
+}
+
+.play-menu-title {
+  font-size: 24px;
+  letter-spacing: 1px;
+  color: #2c3e50;
+  text-align: center;
+  margin: 0 0 4px;
+  font-weight: 400;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.play-menu-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0;
+  margin: 0;
+  gap: 10px;
+}
+
+.play-menu-wallet {
+  color: #2c3e50;
+  font-family: "Press Start 2P", cursive;
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  background: white;
+  height: 48px;
+  border-radius: 12px;
+  border: 3px solid #2c3e50;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.15);
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.play-menu-stats-btn {
+  background: linear-gradient(180deg, #ff9f43 0%, #ff6b6b 100%);
+  color: white;
+  border: 3px solid #2c3e50;
+  border-radius: 12px;
+  padding: 0 20px;
+  height: 48px;
+  font-family: "Press Start 2P", cursive;
+  font-size: 9px;
+  cursor: pointer;
+  box-shadow: 0 4px 0 #d35400;
+  transition: all 0.1s;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.2);
+  box-sizing: border-box;
+}
+
+.play-menu-stats-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 #d35400;
+}
+
+.play-menu-stats-btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #d35400;
+}
+
+.play-menu-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.play-menu-modal-item {
+  width: 100%;
+  min-height: 58px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  font-family: "Press Start 2P", cursive;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  box-shadow: 4px 5px 0 rgba(0, 0, 0, 0.3);
+  transition: transform 0.05s ease, box-shadow 0.05s ease;
+  border: 3px solid #2c3e50;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.2);
+  box-sizing: border-box;
+  padding: 0 20px;
+}
+
+.play-menu-modal-item:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Home - Blue */
+.menu-item-home {
+  background: linear-gradient(180deg, #6bb8ee 0%, #3e8ccd 100%);
+  color: #fff;
+}
+
+/* Leaderboard - Green */
+.menu-item-leaderboard {
+  background: linear-gradient(180deg, #71e8b2 0%, #3cae81 100%);
+  color: #0c3d2c;
+}
+
+/* Logout - Red */
+.play-menu-modal-item.logout {
+  background: linear-gradient(180deg, #ff8a8a 0%, #dd3d3d 100%);
+  color: #fff;
+}
+
+.play-menu-modal-separator {
+  height: 2px;
+  background: rgba(0, 0, 0, 0.1);
+  margin: 0;
+}
+
+
 
 .play-nav-deposit {
   width: 100%;
@@ -1957,7 +2286,7 @@ canvas.game {
   box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.34);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 8px;
   box-sizing: border-box;
 }
@@ -1968,6 +2297,7 @@ canvas.game {
   font-size: 11px;
   line-height: 1.35;
   color: #edf5ff;
+  text-align: center;
 }
 
 .play-status-idle {
@@ -2113,8 +2443,8 @@ canvas.game {
     font-size: 8px;
   }
 
-  #leaderboard-panel,
-  #stats-panel {
+  #leaderboard-modal,
+  #stats-modal {
     width: 100%;
     padding: 9px;
   }
@@ -2145,10 +2475,10 @@ canvas.game {
   }
 
   #bet-hud {
-    right: 10px;
-    top: var(--play-nav-hud-offset, 200px);
-    bottom: auto;
-    width: 188px;
+    position: relative;
+    top: auto;
+    right: auto;
+    width: 100%;
   }
 
   .play-nav {
@@ -2282,6 +2612,20 @@ canvas.game {
 .flow-status strong {
   font-weight: 600;
   color: #ffe066;
+}
+
+.bet-hud-decay-label,
+.bet-hud-decay-value {
+  font-size: 10px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #ff9b9b;
+  animation: decay-scary-blink 0.6s infinite ease-in-out;
+}
+
+@keyframes decay-scary-blink {
+  0%, 100% { color: #ff9b9b; text-shadow: none; }
+  50% { color: #ff0000; text-shadow: 0 0 8px rgba(255, 0, 0, 0.6); }
 }
 
 .flow-label {
@@ -3000,9 +3344,9 @@ canvas.game {
 .play-bg-mode #deposit-modal,
 .play-bg-mode #result-container,
 .play-bg-mode #leaderboard-btn,
-.play-bg-mode #leaderboard-panel,
+.play-bg-mode #leaderboard-modal,
 .play-bg-mode #stats-btn,
-.play-bg-mode #stats-panel,
+.play-bg-mode #stats-modal,
 .play-bg-mode #game-help-btn,
 .play-bg-mode #game-help-modal {
   display: none !important;

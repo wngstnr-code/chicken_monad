@@ -1,15 +1,10 @@
 "use client";
 
+import { useAppKit } from "@reown/appkit/react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { SiweMessage } from "siwe";
-import {
-  useAccount,
-  useConnect,
-  useDisconnect,
-  useSignMessage,
-  useSwitchChain,
-} from "wagmi";
+import { useAccount, useDisconnect, useSignMessage, useSwitchChain } from "wagmi";
 import { backendFetch, backendPost } from "../../lib/backend/api";
 import { BACKEND_API_URL, hasBackendApiConfig } from "../../lib/backend/config";
 import { MONAD_CHAIN, hasMonadChainConfig } from "../../lib/web3/monad";
@@ -96,11 +91,12 @@ function getEip1193Provider() {
 
 export function WalletProvider({ children }: WalletProviderProps) {
   const [error, setError] = useState("");
+  const [isAppKitOpening, setIsAppKitOpening] = useState(false);
   const [backendAddress, setBackendAddress] = useState("");
   const [backendAuthLoading, setBackendAuthLoading] = useState(false);
   const [backendAuthError, setBackendAuthError] = useState("");
+  const { open } = useAppKit();
   const { address, chainId, isConnected } = useAccount();
-  const { connectAsync, connectors, isPending: isConnectPending } = useConnect();
   const { disconnect } = useDisconnect();
   const { signMessageAsync } = useSignMessage();
   const { switchChainAsync, isPending: isSwitchPending } = useSwitchChain();
@@ -113,30 +109,26 @@ export function WalletProvider({ children }: WalletProviderProps) {
   const isMonadChain =
     hasMonadConfig &&
     chainIdHex.toLowerCase() === (MONAD_CHAIN.chainIdHex || "").toLowerCase();
-  const isConnecting = isConnectPending || isSwitchPending;
+  const isConnecting = isAppKitOpening || isSwitchPending;
   const isBackendAuthenticated =
     Boolean(backendAddress) &&
     Boolean(normalizedAccount) &&
     backendAddress.toLowerCase() === normalizedAccount;
 
   async function connectWallet() {
-    if (connectors.length === 0) {
-      setError("Rabby wallet tidak terdeteksi. Install/aktifkan Rabby extension dulu.");
-      return;
-    }
-
     setError("");
-    const selectedConnector =
-      connectors.find((connector) => connector.id === "rabby") || connectors[0];
+    setIsAppKitOpening(true);
 
     try {
-      await connectAsync({ connector: selectedConnector });
+      await open();
     } catch (connectError) {
       setError(
-        toUserFacingWalletError(connectError, "Gagal connect wallet.", {
+        toUserFacingWalletError(connectError, "Gagal membuka modal wallet.", {
           userRejectedMessage: "Connect wallet dibatalkan.",
         }),
       );
+    } finally {
+      setIsAppKitOpening(false);
     }
   }
 

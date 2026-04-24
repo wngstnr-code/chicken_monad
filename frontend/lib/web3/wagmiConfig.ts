@@ -1,6 +1,4 @@
 import type { Chain } from "viem";
-import { createConfig, http } from "wagmi";
-import { injected } from "@wagmi/core";
 import { MONAD_CHAIN } from "./monad";
 
 const FALLBACK_CHAIN_ID = 10143;
@@ -37,11 +35,13 @@ function buildMonadWagmiChain(): Chain {
 
 export const monadWagmiChain = buildMonadWagmiChain();
 
-export const wagmiConfig = createConfig({
-  ssr: true,
-  chains: [monadWagmiChain],
-  connectors: [injected({ target: "rabby" })],
-  transports: {
-    [monadWagmiChain.id]: http(monadWagmiChain.rpcUrls.default.http[0]),
-  },
-});
+export const appKitNetworks: [Chain, ...Chain[]] = [monadWagmiChain];
+
+export const projectId = process.env.NEXT_PUBLIC_REOWN_PROJECT_ID || "demo-project-id";
+
+export const appKitMetadata = {
+  name: "Chicken Monad",
+  description: "Crossy chicken game with mock betting HUD on Monad testnet.",
+  url: "http://localhost:3000",
+  icons: ["https://avatars.githubusercontent.com/u/37784886"],
+};

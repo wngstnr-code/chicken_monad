@@ -110,6 +110,18 @@ type ChickenBridgePlayerTransactionsPayload = {
   offset: number;
 };
 
+type ChickenBridgePlayBlocker =
+  | {
+      kind: "none";
+    }
+  | {
+      kind: "pending_settlement" | "active_previous";
+      message: string;
+      actionLabel: string;
+      onchainSessionId?: string;
+      pendingCount?: number;
+    };
+
 type ChickenBridgeApi = {
   backgroundMode: boolean;
   loadAvailableBalance: () => Promise<number>;
@@ -129,6 +141,8 @@ type ChickenBridgeApi = {
   cashOut: () => Promise<ChickenBridgeSettlementResult>;
   crash: (reason?: string) => Promise<ChickenBridgeSettlementResult | null>;
   autoSettlePending: () => Promise<boolean>;
+  getPlayBlocker: () => Promise<ChickenBridgePlayBlocker>;
+  resolvePlayBlocker: () => Promise<boolean>;
 };
 
 interface Window {

@@ -14,6 +14,17 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
 
       <div id="top-bar">
         <div id="top-bar-left">
+          <div className="tab-buttons-row">
+            <button
+              id="leaderboard-btn"
+              type="button"
+              aria-expanded="false"
+              aria-controls="leaderboard-modal"
+            >
+              <span className="leaderboard-btn-label">LEADERBOARD</span>
+            </button>
+          </div>
+
           <div className="stat-card score-card">
             <div className="score-card-main">
               <div className="score-metric">
@@ -31,101 +42,67 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
               </div>
             </div>
           </div>
-          <button
-            id="leaderboard-btn"
-            type="button"
-            aria-expanded="false"
-            aria-controls="leaderboard-panel"
-          >
-            <span className="leaderboard-btn-label">LEADERBOARD</span>
-            <span className="leaderboard-btn-chevron" aria-hidden="true">
-              {"\u25BE"}
-            </span>
-          </button>
 
-          <div id="leaderboard-panel" style={{ display: "none" }} aria-hidden="true">
-            <div className="leaderboard-panel-head">
-              <h3>TOP PLAYERS</h3>
+          <div id="bet-hud" style={{ display: "block" }}>
+            <div
+              id="bet-hud-active"
+              className="bet-hud-active"
+              style={{ display: "none" }}
+            >
+              <div className="bet-hud-metric-grid">
+                <div className="bet-hud-metric bet-hud-metric-primary">
+                  <span className="bet-hud-metric-label">STAKE</span>
+                  <span id="bet-stake" className="bet-hud-metric-value">
+                    $0.00
+                  </span>
+                </div>
+                <div className="bet-hud-metric bet-hud-metric-primary">
+                  <span className="bet-hud-metric-label">CASH OUT</span>
+                  <span
+                    id="bet-payout"
+                    className="bet-hud-metric-value payout-value"
+                  >
+                    $0.00
+                  </span>
+                </div>
+                <div className="bet-hud-metric bet-hud-metric-wide">
+                  <span className="bet-hud-metric-label">MULTIPLIER</span>
+                  <span
+                    id="bet-multiplier"
+                    className="bet-hud-metric-value multiplier-value"
+                  >
+                    0.00x
+                  </span>
+                </div>
+              </div>
+
+              <div
+                id="bet-hud-decay"
+                className="bet-hud-decay"
+                style={{ display: "none" }}
+              >
+                <span className="bet-hud-decay-label">DECAYING</span>
+                <span id="bet-decay" className="bet-hud-decay-value">
+                  -0.1x
+                </span>
+              </div>
             </div>
-            <p id="leaderboard-status" className="leaderboard-status">
-              Top 10 players by best hops.
-            </p>
-            <div className="leaderboard-self-card">
-              <span>YOUR RANK</span>
-              <strong id="leaderboard-your-rank">-</strong>
+
+            <div id="bet-hud-idle" className="bet-hud-idle">
+              Start a bet to see live payout and multiplier.
             </div>
-            <ol id="leaderboard-list" className="leaderboard-list" />
-            <button id="leaderboard-refresh" type="button">
-              REFRESH
+
+            <button
+              id="cash-out-btn"
+              className="disabled"
+              disabled
+              style={{ display: "none" }}
+            >
+              CASH OUT
             </button>
           </div>
 
-          <button
-            id="stats-btn"
-            type="button"
-            aria-expanded="false"
-            aria-controls="stats-panel"
-          >
-            <span className="stats-btn-label">STATS</span>
-            <span className="stats-btn-chevron" aria-hidden="true">
-              {"\u25BE"}
-            </span>
-          </button>
 
-          <div id="stats-panel" style={{ display: "none" }} aria-hidden="true">
-            <div className="leaderboard-panel-head">
-              <h3>PLAYER STATS</h3>
-            </div>
-            <p id="stats-status" className="leaderboard-status">
-              Track your runs and recent onchain activity.
-            </p>
-            <div className="stats-summary-grid">
-              <div className="stats-summary-card">
-                <span>GAMES</span>
-                <strong id="stats-total-games">0</strong>
-              </div>
-              <div className="stats-summary-card">
-                <span>WINS</span>
-                <strong id="stats-total-wins">0</strong>
-              </div>
-              <div className="stats-summary-card">
-                <span>LOSSES</span>
-                <strong id="stats-total-losses">0</strong>
-              </div>
-              <div className="stats-summary-card">
-                <span>NET PNL</span>
-                <strong id="stats-total-profit">$0.00</strong>
-              </div>
-            </div>
-            <p id="stats-joined" className="stats-joined">
-              Joined: -
-            </p>
-            <div className="stats-tabs" role="tablist" aria-label="Player history">
-              <button
-                id="stats-tab-runs"
-                className="active"
-                type="button"
-                data-stats-tab="runs"
-                role="tab"
-                aria-selected="true"
-              >
-                RUNS
-              </button>
-              <button
-                id="stats-tab-txs"
-                type="button"
-                data-stats-tab="txs"
-                role="tab"
-                aria-selected="false"
-              >
-                TXS
-              </button>
-            </div>
-            <div id="stats-list" className="stats-list" />
-            <button id="stats-refresh" type="button">
-              REFRESH
-            </button>
-          </div>
         </div>
         <div id="top-bar-center">
           <div className="stat-card">
@@ -144,42 +121,6 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
           </div>
           <button id="bet-btn">BET</button>
         </div>
-      </div>
-
-      <div id="bet-hud" style={{ display: "none" }}>
-        <div className="hud-row">
-          <span className="hud-label">STAKE</span>
-          <span id="bet-stake">$0.00</span>
-        </div>
-        <div className="hud-row">
-          <span className="hud-label">CP</span>
-          <span id="bet-cp" className="cp-value">
-            CP 0
-          </span>
-        </div>
-        <div className="hud-row">
-          <span className="hud-label">MULT</span>
-          <span id="bet-multiplier" className="multiplier-value">
-            0.00x
-          </span>
-        </div>
-        <div id="decay-row" className="hud-row hud-row-decay" style={{ display: "none" }}>
-          <span className="hud-label decay-label">DECAY</span>
-          <span id="bet-decay" className="decay-value">-0.1x/s</span>
-        </div>
-        <div className="hud-row">
-          <span className="hud-label">CASH OUT</span>
-          <span id="bet-payout" className="payout-value">
-            $0.00
-          </span>
-        </div>
-        <div id="cp-timer-row" className="hud-row hud-row-cp-timer" style={{ display: "none" }}>
-          <span className="hud-label cp-timer-label">CP TIME</span>
-          <span id="bet-cp-timer" className="cp-timer-value">1:00</span>
-        </div>
-        <button id="cash-out-btn" className="disabled" disabled>
-          RUN TO NEXT CP
-        </button>
       </div>
 
       <div id="controls">
@@ -201,7 +142,13 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
 
           <div className="field">
             <label>STAKE ($)</label>
-            <input type="number" id="stake-input" defaultValue="10" min="1" step="1" />
+            <input
+              type="number"
+              id="stake-input"
+              defaultValue="10"
+              min="1"
+              step="1"
+            />
           </div>
 
           <div className="quick-picks">
@@ -233,13 +180,16 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
             <div className="odds-divider" aria-hidden="true" />
             <div className="odds-note-list">
               <div className="odds-note-item">
-                <span className="dot dot-yellow" aria-hidden="true" /> 60s timer between checkpoints
+                <span className="dot dot-yellow" aria-hidden="true" /> 60s timer
+                between checkpoints
               </div>
               <div className="odds-note-item">
-                <span className="dot dot-green" aria-hidden="true" /> Cash out only while at checkpoint
+                <span className="dot dot-green" aria-hidden="true" /> Cash out
+                only while at checkpoint
               </div>
               <div className="odds-note-item">
-                <span className="dot dot-red" aria-hidden="true" /> Overtime penalty: -0.1x per second
+                <span className="dot dot-red" aria-hidden="true" /> Overtime
+                penalty: -0.1x per second
               </div>
             </div>
           </div>
@@ -264,7 +214,13 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
 
           <div className="field">
             <label>AMOUNT (USDC)</label>
-            <input type="number" id="deposit-amount" defaultValue="100" min="0.1" step="0.1" />
+            <input
+              type="number"
+              id="deposit-amount"
+              defaultValue="100"
+              min="0.1"
+              step="0.1"
+            />
           </div>
 
           <div className="quick-picks">
@@ -323,13 +279,31 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
         </div>
       </div>
 
-      <button id="game-help-btn" className="fixed-help" type="button" title="Game Rules">
+      <button
+        id="game-help-btn"
+        className="fixed-help"
+        type="button"
+        title="Game Rules"
+      >
         ?
       </button>
 
-      <div id="game-help-modal" className="info-modal-overlay" style={{ display: "none" }}>
-        <div className="info-modal-box" role="dialog" aria-modal="true" aria-labelledby="game-help-title">
-          <button className="info-modal-close" id="game-help-close" aria-label="Close">
+      <div
+        id="game-help-modal"
+        className="info-modal-overlay"
+        style={{ display: "none" }}
+      >
+        <div
+          className="info-modal-box"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="game-help-title"
+        >
+          <button
+            className="info-modal-close"
+            id="game-help-close"
+            aria-label="Close"
+          >
             X
           </button>
           <h2 id="game-help-title">GAME RULES</h2>
@@ -382,7 +356,11 @@ export function GameCanvas({ backgroundMode = false }: GameCanvasProps) {
               </div>
             </div>
           </div>
-          <button className="flow-btn secondary info-modal-action" id="game-help-got-it" type="button">
+          <button
+            className="flow-btn secondary info-modal-action"
+            id="game-help-got-it"
+            type="button"
+          >
             GOT IT
           </button>
         </div>
