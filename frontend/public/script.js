@@ -48,6 +48,225 @@ const bet = {
 let gameOver = false;
 let settlementPending = false;
 let lastLiveBetStatusMessage = "";
+let audioCtx = null;
+let audioUnlocked = false;
+let lastStepSfxAt = 0;
+let lastCrashSfxAt = 0;
+let lastCheckpointSfxAt = 0;
+const SFX_STORAGE_KEY = "chickenSfxVolume";
+const SFX_MASTER_GAIN = 2.8;
+let sfxVolume = 0.9;
+
+function ensureAudioContext() {
+  if (audioCtx) return audioCtx;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return null;
+  audioCtx = new AudioContextClass();
+  return audioCtx;
+}
+
+function clampSfxVolume(value) {
+  const num = Number(value);
+  if (!isFinite(num)) return 0.9;
+  return Math.min(1, Math.max(0, num));
+}
+
+function readStoredSfxVolume() {
+  try {
+    const raw = localStorage.getItem(SFX_STORAGE_KEY);
+    if (raw == null || raw === "") return 0.9;
+    return clampSfxVolume(parseFloat(raw));
+  } catch (_error) {
+    return 0.9;
+  }
+}
+
+function writeStoredSfxVolume(value) {
+  try {
+    localStorage.setItem(SFX_STORAGE_KEY, String(clampSfxVolume(value)));
+  } catch (_error) {
+    // ignore storage errors in private mode / restricted contexts
+  }
+}
+
+function applySfxVolume(value) {
+  sfxVolume = clampSfxVolume(value);
+  writeStoredSfxVolume(sfxVolume);
+}
+
+async function unlockAudio() {
+  if (audioUnlocked) return;
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  if (ctx.state === "suspended") {
+    try {
+      await ctx.resume();
+    } catch (_error) {
+      return;
+    }
+  }
+  audioUnlocked = ctx.state === "running";
+}
+
+function playTone({
+  frequency = 440,
+  durationMs = 120,
+  type = "sine",
+  volume = 0.02,
+  frequencyEnd = null,
+} = {}) {
+  const ctx = ensureAudioContext();
+  if (!ctx || !audioUnlocked) return;
+
+  const now = ctx.currentTime;
+  const durationSec = Math.max(0.02, durationMs / 1000);
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  const targetVolume = Math.min(
+    0.5,
+    Math.max(0.0001, volume * SFX_MASTER_GAIN * sfxVolume),
+  );
+
+  osc.type = type;
+  osc.frequency.setValueAtTime(frequency, now);
+  if (isFinite(frequencyEnd) && frequencyEnd > 0) {
+    osc.frequency.exponentialRampToValueAtTime(
+      frequencyEnd,
+      now + durationSec,
+    );
+  }
+
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(targetVolume, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + durationSec + 0.01);
+}
+
+function playStepSfx() {
+  const now = Date.now();
+  if (now - lastStepSfxAt < 90) return;
+  lastStepSfxAt = now;
+  playTone({
+    frequency: 360,
+    frequencyEnd: 290,
+    durationMs: 75,
+    type: "triangle",
+    volume: 0.03,
+  });
+}
+
+function playCrashSfx() {
+  const nowMs = Date.now();
+  if (nowMs - lastCrashSfxAt < 550) return;
+  lastCrashSfxAt = nowMs;
+  void unlockAudio();
+
+  playTone({
+    frequency: 1300,
+    frequencyEnd: 420,
+    durationMs: 140,
+    type: "square",
+    volume: 0.28,
+  });
+  playTone({
+    frequency: 820,
+    frequencyEnd: 160,
+    durationMs: 460,
+    type: "triangle",
+    volume: 0.22,
+  });
+}
+
+function playStartBetSfx() {
+  void unlockAudio();
+  playTone({
+    frequency: 560,
+    frequencyEnd: 760,
+    durationMs: 110,
+    type: "square",
+    volume: 0.08,
+  });
+}
+
+function playCheckpointSfx() {
+  const nowMs = Date.now();
+  if (nowMs - lastCheckpointSfxAt < 500) return;
+  lastCheckpointSfxAt = nowMs;
+  void unlockAudio();
+
+  const ctx = ensureAudioContext();
+  if (!ctx || !audioUnlocked) return;
+
+  const now = ctx.currentTime;
+  const notes = [660, 820, 980];
+  notes.forEach((freq, index) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const start = now + index * 0.06;
+    const end = start + 0.13;
+    const target = Math.min(0.5, 0.07 * SFX_MASTER_GAIN * sfxVolume);
+
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(freq, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(
+      Math.max(0.0001, target),
+      start + 0.01,
+    );
+    gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(end + 0.01);
+  });
+}
+
+function playCashoutSfx() {
+  void unlockAudio();
+  playTone({
+    frequency: 700,
+    frequencyEnd: 980,
+    durationMs: 130,
+    type: "triangle",
+    volume: 0.1,
+  });
+  playTone({
+    frequency: 980,
+    frequencyEnd: 1240,
+    durationMs: 150,
+    type: "triangle",
+    volume: 0.08,
+  });
+}
+
+function setupAudioUnlock() {
+  const unlockOnce = () => {
+    void unlockAudio();
+    window.removeEventListener("pointerdown", unlockOnce);
+    window.removeEventListener("touchstart", unlockOnce);
+    window.removeEventListener("keydown", unlockOnce);
+  };
+  window.addEventListener("pointerdown", unlockOnce, { passive: true });
+  window.addEventListener("touchstart", unlockOnce, { passive: true });
+  window.addEventListener("keydown", unlockOnce);
+}
+
+function setupSfxVolumeSync() {
+  applySfxVolume(readStoredSfxVolume());
+  window.addEventListener("chicken:set-sfx-volume", (event) => {
+    const detail = (event && event.detail) || {};
+    applySfxVolume(detail.value);
+  });
+}
+
+setupAudioUnlock();
+setupSfxVolumeSync();
 
 function getBridge() {
   return window.__CHICKEN_MONAD_BRIDGE__;
@@ -295,6 +514,7 @@ function activateBet(stake, availableBalance) {
   lastLiveBetStatusMessage = "";
 
   initializeGame();
+  playStartBetSfx();
   return true;
 }
 
@@ -378,6 +598,7 @@ function onPlayerAdvance(newRowIndex) {
 }
 
 function reachCheckpoint(rowIndex) {
+  playCheckpointSfx();
   bet.currentCp += 1;
   bet.cpRowIndex = rowIndex;
 
@@ -499,6 +720,8 @@ async function crashBet(reason) {
   if (!bet.active) return;
   if (settlementPending) return;
 
+  playCrashSfx();
+
   if (hasLiveBridge()) {
     settlementPending = true;
     setBetButtonState();
@@ -537,6 +760,7 @@ async function crashBet(reason) {
         profit: -lostStake,
         rows: bet.maxRow,
         cp: bet.currentCp,
+        silent: true,
       });
     } catch (error) {
       console.error("Failed to settle crash:", error);
@@ -864,7 +1088,10 @@ function showResult(data) {
   const bodyEl = document.getElementById("result-body");
   if (!resultDOM || !titleEl || !bodyEl) return;
 
+  const shouldPlaySfx = !data.silent;
+
   if (data.type === "cashout") {
+    if (shouldPlaySfx) playCashoutSfx();
     titleEl.innerText = "CASHED OUT";
     titleEl.style.color = "#27ae60";
     const profitClass =
@@ -878,6 +1105,7 @@ function showResult(data) {
       <p class="${profitClass}">Profit: ${profitSign}$${Math.abs(data.profit).toFixed(2)}</p>
     `;
   } else if (data.type === "crash") {
+    if (shouldPlaySfx) playCrashSfx();
     titleEl.innerText = "CRASHED";
     titleEl.style.color = "#c0392b";
     bodyEl.innerHTML = `
@@ -887,6 +1115,7 @@ function showResult(data) {
       <p class="profit-negative">Lost: -$${data.stake.toFixed(2)}</p>
     `;
   } else {
+    if (shouldPlaySfx) playCrashSfx();
     titleEl.innerText = "GAME OVER";
     titleEl.style.color = "#c0392b";
     bodyEl.innerHTML = `<p>Hops: <strong>${position.currentRow}</strong></p>`;
@@ -1500,6 +1729,8 @@ function queueMove(direction) {
 function stepCompleted() {
   const direction = movesQueue.shift();
   if (!direction) return;
+
+  playStepSfx();
 
   if (direction === "forward") position.currentRow += 1;
   if (direction === "backward") position.currentRow -= 1;

@@ -29,6 +29,8 @@ type PlayStatusState = {
   sticky?: boolean;
 };
 
+const SFX_STORAGE_KEY = "chickenSfxVolume";
+
 export function PlayTopNav() {
   const {
     account,
@@ -48,6 +50,7 @@ export function PlayTopNav() {
   const [isDepositBusy, setIsDepositBusy] = useState(false);
   const [isWalletMenuOpen, setIsWalletMenuOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [sfxVolumePercent, setSfxVolumePercent] = useState(90);
   const [transientStatus, setTransientStatus] =
     useState<PlayStatusState | null>(null);
   const [playBlocker, setPlayBlocker] =
@@ -96,6 +99,22 @@ export function PlayTopNav() {
 
   function onMenuButtonClick() {
     setIsMenuOpen((prev) => !prev);
+  }
+
+  function updateSfxVolume(percent: number) {
+    const nextPercent = Math.min(100, Math.max(0, Math.round(percent)));
+    setSfxVolumePercent(nextPercent);
+    const normalized = nextPercent / 100;
+    try {
+      localStorage.setItem(SFX_STORAGE_KEY, String(normalized));
+    } catch {
+      // ignore storage errors
+    }
+    window.dispatchEvent(
+      new CustomEvent("chicken:set-sfx-volume", {
+        detail: { value: normalized },
+      }),
+    );
   }
 
   function onStatsClick() {
@@ -365,6 +384,24 @@ export function PlayTopNav() {
   }, [isConnected]);
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SFX_STORAGE_KEY);
+      const initial = raw == null || raw === "" ? 0.9 : Number.parseFloat(raw);
+      const safe = Number.isFinite(initial)
+        ? Math.min(1, Math.max(0, initial))
+        : 0.9;
+      setSfxVolumePercent(Math.round(safe * 100));
+      window.dispatchEvent(
+        new CustomEvent("chicken:set-sfx-volume", {
+          detail: { value: safe },
+        }),
+      );
+    } catch {
+      setSfxVolumePercent(90);
+    }
+  }, []);
+
+  useEffect(() => {
     const navEl = navRef.current;
     if (!navEl) return;
 
@@ -540,6 +577,32 @@ export function PlayTopNav() {
                   >
                     LEADERBOARD
                   </button>
+                  <div className="play-menu-volume">
+                    <div className="play-menu-volume-head">
+                      <span>SFX VOLUME</span>
+                      <strong>{sfxVolumePercent}%</strong>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={sfxVolumePercent}
+                      onChange={(event) => {
+                        updateSfxVolume(Number(event.target.value));
+                      }}
+                      aria-label="SFX volume"
+                    />
+                    <button
+                      type="button"
+                      className="play-menu-volume-mute"
+                      onClick={() => {
+                        updateSfxVolume(0);
+                      }}
+                    >
+                      MUTE
+                    </button>
+                  </div>
                   <div className="play-menu-modal-separator" />
                   <button
                     type="button"
