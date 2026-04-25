@@ -1,7 +1,6 @@
 import {
   createPublicClient,
   createWalletClient,
-  encodeFunctionData,
   http,
   isHex,
   parseAbi,
@@ -12,6 +11,15 @@ import { privateKeyToAccount } from "viem/accounts";
 import { env } from "../config/env.js";
 
 const GAME_SETTLEMENT_WRITE_ABI = parseAbi([
+  "error InvalidSigner()",
+  "error InvalidSignatureSigner()",
+  "error SessionAlreadySettled()",
+  "error SessionNotActive()",
+  "error SessionNotFound()",
+  "error ResolutionExpired()",
+  "error InsufficientTreasury()",
+  "error ResolutionPayoutMismatch()",
+  "error ResolutionStakeMismatch()",
   "function settleWithSignature((bytes32 sessionId,address player,uint256 stakeAmount,uint256 payoutAmount,uint256 finalMultiplierBp,uint8 outcome,uint64 deadline) resolution, bytes signature)",
 ]);
 const SETTLEMENT_GAS_BUFFER = 35_000n;
@@ -94,14 +102,12 @@ export async function submitSettlementOnchain(params: {
   const normalizedResolution = normalizeResolution(params.resolution);
   const args = [normalizedResolution, signature as Hex] as const;
 
-  await settlementPublicClient.call({
+  await settlementPublicClient.simulateContract({
     account: account.address,
-    to: env.GAME_SETTLEMENT_ADDRESS as Address,
-    data: encodeFunctionData({
-      abi: GAME_SETTLEMENT_WRITE_ABI,
-      functionName: "settleWithSignature",
-      args,
-    }),
+    address: env.GAME_SETTLEMENT_ADDRESS as Address,
+    abi: GAME_SETTLEMENT_WRITE_ABI,
+    functionName: "settleWithSignature",
+    args,
   });
 
   const estimatedGas = await settlementPublicClient.estimateContractGas({

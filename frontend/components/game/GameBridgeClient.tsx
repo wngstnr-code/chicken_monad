@@ -110,7 +110,10 @@ const RESPONSE_TIMEOUT_MS = 45_000;
 const RECONNECT_GRACE_TIMEOUT_MS = 32_000;
 const APPROVE_MAX_USDC_UNITS = parseUnits("10000000", USDC_DECIMALS);
 const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
-const ACTIVE_SESSION_CACHE_MS = 1200;
+const ACTIVE_SESSION_CACHE_MS = 3_000;
+const ACTIVE_SESSION_STALE_FALLBACK_MS = 15_000;
+const ACTIVE_SESSION_MIN_REQUEST_GAP_MS = 1_200;
+const RPC_RATE_LIMIT_BACKOFF_BASE_MS = 350;
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
@@ -220,6 +223,11 @@ export function GameBridgeClient({
     value: ZERO_BYTES32,
     fetchedAt: 0,
   });
+  const activeSessionLastRequestAtRef = useRef<number>(0);
+  const activeSessionInFlightRef = useRef<{
+    address: Address;
+    promise: Promise<string>;
+  } | null>(null);
 
   useEffect(() => {
     if (backgroundMode) return;
@@ -585,7 +593,9 @@ export function GameBridgeClient({
           if (!isRateLimitedRpcError(error) || attempt >= retries) {
             throw error;
           }
-          const backoffMs = 250 * Math.pow(2, attempt);
+          const jitterMs = Math.floor(Math.random() * 120);
+          const backoffMs =
+            RPC_RATE_LIMIT_BACKOFF_BASE_MS * Math.pow(2, attempt) + jitterMs;
           attempt += 1;
           await sleep(backoffMs);
         }
@@ -661,31 +671,83 @@ export function GameBridgeClient({
     async function readActiveSessionId(address: Address) {
       const cached = activeSessionCacheRef.current;
       const now = Date.now();
+      const normalizedAddress = address.toLowerCase();
       if (
         cached.address &&
-        cached.address.toLowerCase() === address.toLowerCase() &&
+        cached.address.toLowerCase() === normalizedAddress &&
         now - cached.fetchedAt < ACTIVE_SESSION_CACHE_MS
       ) {
         return cached.value;
       }
 
-      const value = await readContractWithRetry(() =>
-        readContract(wagmiConfig, {
-          address: GAME_SETTLEMENT_ADDRESS as Address,
-          abi: GAME_SETTLEMENT_ABI,
-          functionName: "activeSessionOf",
-          args: [address],
-        }),
-      );
+      const inFlight = activeSessionInFlightRef.current;
+      if (inFlight && inFlight.address.toLowerCase() === normalizedAddress) {
+        return inFlight.promise;
+      }
 
-      const normalized = String(value || "");
-      activeSessionCacheRef.current = {
+      if (
+        now - activeSessionLastRequestAtRef.current <
+          ACTIVE_SESSION_MIN_REQUEST_GAP_MS &&
+        cached.address &&
+        cached.address.toLowerCase() === normalizedAddress &&
+        now - cached.fetchedAt < ACTIVE_SESSION_STALE_FALLBACK_MS
+      ) {
+        return cached.value;
+      }
+
+      const requestPromise = (async () => {
+        try {
+          activeSessionLastRequestAtRef.current = Date.now();
+          const value = await readContractWithRetry(
+            () =>
+              readContract(wagmiConfig, {
+                address: GAME_SETTLEMENT_ADDRESS as Address,
+                abi: GAME_SETTLEMENT_ABI,
+                functionName: "activeSessionOf",
+                args: [address],
+              }),
+            4,
+          );
+
+          const normalized = String(value || "");
+          activeSessionCacheRef.current = {
+            address,
+            value: normalized,
+            fetchedAt: Date.now(),
+          };
+
+          return normalized;
+        } catch (error) {
+          const fallback = activeSessionCacheRef.current;
+          if (
+            isRateLimitedRpcError(error) &&
+            fallback.address &&
+            fallback.address.toLowerCase() === normalizedAddress &&
+            Date.now() - fallback.fetchedAt < ACTIVE_SESSION_STALE_FALLBACK_MS
+          ) {
+            console.warn(
+              "⚠️ RPC rate-limited on activeSessionOf, using cached value.",
+            );
+            return fallback.value;
+          }
+          throw error;
+        } finally {
+          const currentInFlight = activeSessionInFlightRef.current;
+          if (
+            currentInFlight &&
+            currentInFlight.address.toLowerCase() === normalizedAddress
+          ) {
+            activeSessionInFlightRef.current = null;
+          }
+        }
+      })();
+
+      activeSessionInFlightRef.current = {
         address,
-        value: normalized,
-        fetchedAt: now,
+        promise: requestPromise,
       };
 
-      return normalized;
+      return requestPromise;
     }
 
     function invalidateActiveSessionCache() {

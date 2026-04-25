@@ -23,64 +23,109 @@ const GAME_SETTLEMENT_READ_ABI = parseAbi([
   "function getSession(bytes32 sessionId) view returns (address player, uint256 stakeAmount, uint64 startedAt, bool active, bool settled)",
 ]);
 
+function collectErrorTexts(error: unknown): string[] {
+  const seen = new Set<unknown>();
+  const queue: unknown[] = [error];
+  const texts: string[] = [];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+
+    const maybe = current as {
+      shortMessage?: unknown;
+      details?: unknown;
+      message?: unknown;
+      cause?: unknown;
+      metaMessages?: unknown;
+    };
+
+    for (const value of [maybe.shortMessage, maybe.details, maybe.message]) {
+      if (typeof value === "string" && value.trim()) {
+        texts.push(value.trim());
+      }
+    }
+
+    if (Array.isArray(maybe.metaMessages)) {
+      for (const meta of maybe.metaMessages) {
+        if (typeof meta === "string" && meta.trim()) {
+          texts.push(meta.trim());
+        }
+      }
+    }
+
+    if (maybe.cause) {
+      queue.push(maybe.cause);
+    }
+  }
+
+  return texts;
+}
+
 function toSettlementErrorMessage(error: unknown) {
-  const raw = String(
-    (error as { shortMessage?: string; message?: string })?.shortMessage ||
-      (error as { message?: string })?.message ||
-      "unknown error",
-  );
-  const lower = raw.toLowerCase();
+  const details = collectErrorTexts(error);
+  const raw = details[0] || "unknown error";
+  const rawJoined = details.join(" | ");
+  const lowerJoined = rawJoined.toLowerCase();
 
   if (
-    lower.includes("insufficient funds") ||
-    lower.includes("funds for gas") ||
-    lower.includes("signer had insufficient balance")
+    lowerJoined.includes("insufficient funds") ||
+    lowerJoined.includes("funds for gas") ||
+    lowerJoined.includes("signer had insufficient balance")
   ) {
     return `Failed to submit settlement onchain: backend relayer kehabisan MON untuk gas (relayer: ${getSettlementRelayerAddress()}).`;
   }
-  if (lower.includes("enotfound") || lower.includes("fetch failed")) {
+  if (lowerJoined.includes("enotfound") || lowerJoined.includes("fetch failed")) {
     return "Failed to submit settlement onchain: backend gagal mengakses RPC Monad.";
   }
-  if (lower.includes("invalidsigner")) {
+  if (lowerJoined.includes("invalidsigner")) {
     return "Failed to submit settlement onchain: signer backend tidak cocok dengan signer di contract.";
   }
-  if (lower.includes("invalidsignaturesigner")) {
+  if (lowerJoined.includes("invalidsignaturesigner")) {
     return "Failed to submit settlement onchain: signature backend tidak cocok dengan backendSigner onchain.";
   }
-  if (lower.includes("sessionalreadysettled")) {
+  if (lowerJoined.includes("sessionalreadysettled")) {
     return "Settlement session ini sudah settled onchain.";
   }
-  if (lower.includes("sessionnotactive")) {
+  if (lowerJoined.includes("sessionnotactive")) {
     return "Settlement session ini sudah tidak aktif onchain.";
   }
-  if (lower.includes("sessionnotfound")) {
+  if (lowerJoined.includes("sessionnotfound")) {
     return "Session onchain tidak ditemukan untuk settlement ini.";
   }
-  if (lower.includes("resolutionexpired")) {
+  if (lowerJoined.includes("resolutionexpired")) {
     return "Settlement signature sudah expired.";
   }
-  if (lower.includes("insufficienttreasury")) {
+  if (lowerJoined.includes("insufficienttreasury")) {
     return "Treasury vault tidak cukup untuk payout settlement ini.";
   }
-  if (lower.includes("resolutionpayoutmismatch")) {
+  if (lowerJoined.includes("resolutionpayoutmismatch")) {
     return "Failed to submit settlement onchain: payload payout tidak cocok dengan rule settlement onchain.";
   }
-  if (lower.includes("resolutionstakemismatch")) {
+  if (lowerJoined.includes("resolutionstakemismatch")) {
     return "Failed to submit settlement onchain: payload stake tidak cocok dengan data session onchain.";
   }
-  if (lower.includes("sessionnotactive") || lower.includes("session already settled")) {
+  if (
+    lowerJoined.includes("sessionnotactive") ||
+    lowerJoined.includes("session already settled")
+  ) {
     return "Settlement session ini sudah tidak aktif onchain.";
+  }
+  if (
+    lowerJoined.includes("execution reverted for an unknown reason") &&
+    details.length > 1
+  ) {
+    return `Failed to submit settlement onchain: ${details.join(" | ")}`;
   }
 
   return `Failed to submit settlement onchain: ${raw}`;
 }
 
 function isAlreadySettledLikeError(error: unknown) {
-  const raw = String(
-    (error as { shortMessage?: string; message?: string })?.shortMessage ||
-      (error as { message?: string })?.message ||
-      "",
-  ).toLowerCase();
+  const raw = collectErrorTexts(error).join(" | ").toLowerCase();
 
   return (
     raw.includes("sessionalreadysettled") ||
