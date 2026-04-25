@@ -9,6 +9,8 @@ body {
   overflow: hidden;
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
+  /* DEBUG TEST — remove after confirming CSS loads */
+  outline: 8px solid red !important;
 }
 
 body {
@@ -2588,6 +2590,566 @@ canvas.game {
   }
 }
 
+/* ============================================================
+   RESPONSIVE — mobile phones (play page)
+============================================================ */
+
+@media (max-width: 480px) {
+  /* --- Top bar (score, balance, timer, bet) --- */
+  #top-bar {
+    top: 8px;
+    left: 8px;
+    --top-bar-control-height: 30px;
+    gap: 5px;
+    width: calc(100vw - 16px);
+  }
+
+  #top-bar-left {
+    width: 158px;
+    min-width: 158px;
+    gap: 4px;
+  }
+
+  #top-bar-left,
+  #top-bar-center {
+    gap: 5px;
+  }
+
+  .stat-card {
+    min-width: 82px;
+    padding: 4px 6px;
+    border-radius: 8px;
+    border-width: 1.5px;
+    box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.3);
+  }
+
+  .stat-label {
+    font-size: 5px;
+    letter-spacing: 0.8px;
+    margin-bottom: 2px;
+  }
+
+  .stat-value {
+    font-size: 10px;
+  }
+
+  .score-card {
+    padding: 5px 6px;
+    min-height: var(--top-bar-control-height);
+  }
+
+  .score-meta {
+    font-size: 5.5px;
+    letter-spacing: 0.6px;
+  }
+
+  .score-card .stat-value {
+    font-size: 11px;
+  }
+
+  .score-cp-value {
+    font-size: 10px;
+  }
+
+  .score-separator {
+    height: 20px;
+  }
+
+  .score-card-main {
+    gap: 6px;
+  }
+
+  /* --- Bet HUD --- */
+  #bet-hud {
+    border-radius: 10px;
+    border-width: 1.5px;
+    box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.35);
+  }
+
+  .bet-hud-active {
+    padding: 5px;
+  }
+
+  .bet-hud-metric-grid {
+    gap: 4px;
+  }
+
+  .bet-hud-metric {
+    padding: 4px 4px 3px;
+    border-radius: 7px;
+    gap: 3px;
+  }
+
+  .bet-hud-metric-primary {
+    min-height: 40px;
+  }
+
+  .bet-hud-metric-label {
+    font-size: 6px;
+    letter-spacing: 0.6px;
+  }
+
+  .bet-hud-metric-value {
+    font-size: 13px;
+  }
+
+  .bet-hud-metric-value.multiplier-value {
+    font-size: 13px;
+  }
+
+  .bet-hud-metric-wide {
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+
+  .bet-hud-decay {
+    margin-top: 3px;
+    padding: 3px 6px 0;
+    gap: 4px;
+    font-size: 8px;
+  }
+
+  .bet-hud-idle {
+    padding: 8px 6px 6px;
+    font-size: 7px;
+    letter-spacing: 0.4px;
+    line-height: 1.4;
+  }
+
+  #cash-out-btn {
+    font-size: 9px;
+    padding: 8px 4px;
+    border-radius: 8px;
+    letter-spacing: 0.5px;
+  }
+
+  /* --- Bet button --- */
+  #bet-btn {
+    min-width: 62px;
+    min-height: var(--top-bar-control-height);
+    border-radius: 8px;
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.35);
+  }
+
+  .timer-card .stat-value {
+    font-size: 10px;
+  }
+
+  /* --- Play nav (wallet, hamburger, deposit, status) --- */
+  .play-nav {
+    top: 44px;
+    right: 8px;
+    width: 148px;
+    min-width: 148px;
+    gap: 4px;
+    --play-nav-control-height: 28px;
+  }
+
+  .play-nav-row {
+    gap: 4px;
+  }
+
+  .play-wallet-trigger {
+    font-size: 7px;
+    padding: 0 7px;
+    border-radius: 8px;
+    box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.35);
+    border-width: 1.5px;
+  }
+
+  .play-menu-trigger {
+    width: 30px;
+    border-radius: 7px;
+    box-shadow: 0 3px 0 #7f8c8d;
+  }
+
+  .hamburger-icon {
+    width: 14px;
+    gap: 2px;
+  }
+
+  .hamburger-icon span {
+    height: 2px;
+  }
+
+  .play-nav-deposit {
+    min-height: 28px;
+    border-radius: 8px;
+    font-size: 8px;
+    letter-spacing: 0.5px;
+    box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.35);
+    border-width: 1.5px;
+  }
+
+  .play-status {
+    min-height: 28px;
+    border-radius: 8px;
+    padding: 4px 6px;
+    gap: 5px;
+    border-width: 1.5px;
+    box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.3);
+  }
+
+  .play-status-text {
+    font-size: 7px;
+    line-height: 1.3;
+  }
+
+  .play-status-action {
+    font-size: 7px;
+    min-height: 18px;
+    padding: 0 5px;
+    border-radius: 5px;
+  }
+
+  /* --- D-pad controls --- */
+  #controls {
+    bottom: 14px;
+  }
+
+  #controls div {
+    grid-template-columns: repeat(3, 48px);
+    grid-template-rows: 42px 42px;
+    gap: 5px;
+    width: calc((48px * 3) + (5px * 2));
+  }
+
+  #controls button {
+    width: 48px;
+    height: 42px;
+    border-radius: 10px;
+    font-size: 13px;
+    box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.45);
+    border-width: 1.5px;
+  }
+
+  /* --- Help button --- */
+  .fixed-help {
+    width: 38px;
+    height: 38px;
+    font-size: 17px;
+    right: 10px;
+    bottom: 10px;
+    border-width: 2px;
+    box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.3);
+  }
+
+  /* --- Modals shrink --- */
+  .modal-box {
+    padding: 16px 14px;
+    gap: 8px;
+    border-radius: 14px;
+    border-width: 2.5px;
+  }
+
+  .modal-box h2 {
+    font-size: 0.85em;
+  }
+
+  .field input {
+    font-size: 14px;
+    padding: 8px 10px;
+    border-width: 2px;
+    border-radius: 8px;
+  }
+
+  .field label {
+    font-size: 8px;
+  }
+
+  .quick-picks {
+    gap: 4px;
+  }
+
+  .quick-picks button {
+    font-size: 8px;
+    padding: 7px 4px;
+    min-height: 34px;
+    border-radius: 7px;
+  }
+
+  .odds-info {
+    font-size: 7px;
+    padding: 7px 8px;
+  }
+
+  .modal-actions button,
+  .modal-actions a {
+    font-size: 9px;
+    padding: 10px 12px;
+    letter-spacing: 0.8px;
+  }
+
+  .leaderboard-modal-box,
+  .stats-modal-box {
+    padding: 30px 18px 18px;
+    border-radius: 18px;
+  }
+
+  .leaderboard-panel-head h3 {
+    font-size: 14px;
+  }
+
+  .play-menu-box {
+    padding: 28px 18px 20px;
+    gap: 14px;
+    border-radius: 18px;
+    border-width: 3px;
+  }
+
+  .play-menu-title {
+    font-size: 18px;
+    margin-bottom: 0;
+  }
+
+  .play-menu-wallet {
+    height: 42px;
+    font-size: 9px;
+    border-radius: 10px;
+    border-width: 2px;
+    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.12);
+  }
+
+  .play-menu-stats-btn {
+    height: 42px;
+    font-size: 9px;
+    padding: 0 14px;
+    border-radius: 10px;
+    border-width: 2px;
+    box-shadow: 0 3px 0 #d35400;
+  }
+
+  .play-menu-modal-item {
+    min-height: 42px;
+    font-size: 9px;
+    border-radius: 10px;
+    border-width: 2px;
+    box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.25);
+    padding: 0 14px;
+  }
+
+  .play-menu-modal-list {
+    gap: 8px;
+  }
+
+  .play-menu-volume {
+    padding: 8px 10px;
+    gap: 6px;
+    border-radius: 10px;
+    border-width: 2px;
+    box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.2);
+  }
+
+  .play-menu-volume-head {
+    font-size: 8px;
+  }
+
+  .play-menu-volume-mute {
+    min-height: 28px;
+    font-size: 8px;
+    border-radius: 8px;
+  }
+
+  #result-container #result {
+    padding: 18px 20px;
+    gap: 10px;
+    border-radius: 14px;
+  }
+
+  #result-container h1 {
+    font-size: 0.95em;
+  }
+
+  #result-container p {
+    font-size: 0.7em;
+  }
+
+  .close-btn {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+    top: 7px;
+    right: 7px;
+  }
+}
+
+@media (max-width: 360px) {
+  #top-bar {
+    top: 6px;
+    left: 6px;
+    --top-bar-control-height: 26px;
+    gap: 4px;
+    width: calc(100vw - 12px);
+  }
+
+  #top-bar-left {
+    width: 132px;
+    min-width: 132px;
+    gap: 3px;
+  }
+
+  .stat-card {
+    min-width: 68px;
+    padding: 3px 4px;
+  }
+
+  .stat-label {
+    font-size: 4.5px;
+    margin-bottom: 1px;
+  }
+
+  .stat-value {
+    font-size: 9px;
+  }
+
+  .score-card .stat-value {
+    font-size: 10px;
+  }
+
+  .score-cp-value {
+    font-size: 9px;
+  }
+
+  .score-meta {
+    font-size: 5px;
+  }
+
+  .score-separator {
+    height: 16px;
+  }
+
+  .bet-hud-metric-label {
+    font-size: 5px;
+  }
+
+  .bet-hud-metric-value {
+    font-size: 11px;
+  }
+
+  .bet-hud-metric-value.multiplier-value {
+    font-size: 11px;
+  }
+
+  .bet-hud-idle {
+    font-size: 6px;
+    padding: 6px 4px 5px;
+  }
+
+  #bet-btn {
+    min-width: 52px;
+    font-size: 8px;
+  }
+
+  .play-nav {
+    top: 38px;
+    right: 6px;
+    width: 126px;
+    min-width: 126px;
+    gap: 3px;
+    --play-nav-control-height: 24px;
+  }
+
+  .play-nav-row {
+    gap: 3px;
+  }
+
+  .play-wallet-trigger {
+    font-size: 6px;
+    padding: 0 5px;
+  }
+
+  .play-menu-trigger {
+    width: 26px;
+  }
+
+  .hamburger-icon {
+    width: 12px;
+    gap: 2px;
+  }
+
+  .play-nav-deposit {
+    min-height: 24px;
+    font-size: 7px;
+  }
+
+  .play-status {
+    min-height: 24px;
+    padding: 3px 5px;
+  }
+
+  .play-status-text {
+    font-size: 6px;
+  }
+
+  .play-status-action {
+    font-size: 6px;
+    min-height: 16px;
+    padding: 0 4px;
+  }
+
+  #controls div {
+    grid-template-columns: repeat(3, 42px);
+    grid-template-rows: 36px 36px;
+    gap: 4px;
+    width: calc((42px * 3) + (4px * 2));
+  }
+
+  #controls button {
+    width: 42px;
+    height: 36px;
+    font-size: 12px;
+    border-radius: 8px;
+  }
+
+  .fixed-help {
+    width: 34px;
+    height: 34px;
+    font-size: 15px;
+  }
+
+  .modal-box {
+    padding: 14px 12px;
+    gap: 6px;
+  }
+
+  .modal-box h2 {
+    font-size: 0.75em;
+  }
+
+  .field input {
+    font-size: 13px;
+    padding: 7px 8px;
+  }
+
+  .play-menu-box {
+    padding: 22px 14px 16px;
+    gap: 10px;
+  }
+
+  .play-menu-title {
+    font-size: 15px;
+  }
+
+  .play-menu-wallet {
+    height: 36px;
+    font-size: 8px;
+  }
+
+  .play-menu-stats-btn {
+    height: 36px;
+    font-size: 8px;
+    padding: 0 10px;
+  }
+
+  .play-menu-modal-item {
+    min-height: 36px;
+    font-size: 8px;
+    padding: 0 10px;
+  }
+}
+
 .flow-page {
   min-height: 100vh;
   width: 100%;
@@ -3557,15 +4119,15 @@ canvas.game {
   }
 
   .home-nav-global {
-    padding: 10px 12px;
+    padding: 12px 16px;
   }
 
   .home-brand-name {
-    font-size: 10px;
+    font-size: 13px;
   }
 
   .home-brand-eyebrow {
-    font-size: 7px;
+    font-size: 8px;
   }
 
   .home-preview-grid {
@@ -3697,12 +4259,14 @@ canvas.game {
 .home-shell {
   width: min(1180px, 100%);
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .home-shell-wide,
 .home-shell-section {
   width: min(1180px, 100%);
   text-align: left;
+  box-sizing: border-box;
 }
 
 .home-hero-grid {
@@ -4308,6 +4872,7 @@ canvas.game {
   background: linear-gradient(180deg, rgba(10, 18, 35, 0.98) 0%, rgba(18, 30, 54, 0.98) 100%);
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: none;
+  box-sizing: border-box;
 }
 
 .home-footer-title {
@@ -4348,6 +4913,12 @@ canvas.game {
   padding: 0;
   background: #071127;
 }
+
+
+  .home-nav-links {
+    width: 100%;
+    overflow-x: auto;
+  }
 
 .dashboard-hero {
   position: relative;
@@ -4522,20 +5093,26 @@ canvas.game {
 
   .home-nav-global,
   .home-hero,
-  .home-section,
   .home-footer {
     padding: 0;
   }
 
+  .home-section {
+    padding: 0 16px;
+  }
+
   .home-nav {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 12px 16px;
+    box-sizing: border-box;
   }
 
   .home-nav-cluster {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
+    width: auto;
+    flex-direction: row;
+    align-items: center;
   }
 
   .home-nav-links {
@@ -4545,7 +5122,10 @@ canvas.game {
   }
 
   .home-nav-login {
-    width: 100%;
+    width: auto;
+    min-width: 0;
+    padding: 10px 16px;
+    font-size: 12px;
   }
 
   .home-hero {
@@ -4570,17 +5150,19 @@ canvas.game {
   }
 
   .home-hero-cta {
-    width: 100%;
-    min-width: 0;
+    width: auto;
+    min-width: 200px;
   }
 
   .home-hero-connect-stack {
-    width: 100%;
+    width: auto;
+    align-items: center;
   }
 
   .home-hero-back-btn,
   .home-hero-connect-error {
-    width: 100%;
+    width: auto;
+    min-width: 200px;
   }
 
   .home-section-about {
@@ -4651,14 +5233,23 @@ canvas.game {
     letter-spacing: 1.3px;
   }
 
-  .home-section-head,
-  .home-footer-shell {
+  .home-section-head {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
+    text-align: center;
   }
 
   .home-footer-shell {
-    padding: 24px 20px;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 32px 16px;
+    gap: 20px;
+    box-sizing: border-box;
+  }
+  
+  .home-footer-links {
+    justify-content: center;
   }
 
   .home-section-cta {

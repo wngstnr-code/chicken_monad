@@ -7,11 +7,7 @@ import { useReadContract } from "wagmi";
 import { useWallet } from "../components/web3/WalletProvider";
 import { backendFetch } from "../lib/backend/api";
 import { hasBackendApiConfig } from "../lib/backend/config";
-import {
-  ERC20_ABI,
-  USDC_ADDRESS,
-  USDC_DECIMALS,
-} from "../lib/web3/contracts";
+import { ERC20_ABI, USDC_ADDRESS, USDC_DECIMALS } from "../lib/web3/contracts";
 
 type ProfitLeaderboardEntry = {
   wallet_address: string;
@@ -522,7 +518,7 @@ export default function Home() {
                   className="flow-btn home-btn-main home-hero-cta"
                   onClick={onHeroPlayNow}
                 >
-                  {isConnected ? "GO TO DASHBOARD" : "PLAY NOW"}
+                  {isConnected ? "DASHBOARD" : "PLAY NOW"}
                 </button>
               )}
             </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { DepositFlowViewModel } from "./types";
 import { useDepositFlow } from "./useDepositFlow";
 
@@ -42,6 +42,22 @@ function readPrimaryLabel(flow: DepositFlowViewModel) {
 
 export function ManageMoneyPage() {
   const flow = useDepositFlow();
+
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const previousHtmlTouchAction = html.style.touchAction;
+    const previousBodyTouchAction = body.style.touchAction;
+
+    // The game shell disables touch gestures globally, so re-enable vertical scrolling here.
+    html.style.touchAction = "pan-y";
+    body.style.touchAction = "pan-y";
+
+    return () => {
+      html.style.touchAction = previousHtmlTouchAction;
+      body.style.touchAction = previousBodyTouchAction;
+    };
+  }, []);
 
   const returnHref = flow.isConnected ? "/dashboard" : "/";
   const returnLabel = flow.isConnected ? "DASHBOARD" : "HOME";
@@ -158,7 +174,7 @@ export function ManageMoneyPage() {
               </span>
             </div>
           </div>
-          <h1 className="flow-title money-title">Manage Money</h1>
+          <h1 className="flow-title money-title">MANAGE MONEY</h1>
         </header>
 
         <div className="money-grid">
@@ -265,13 +281,13 @@ export function ManageMoneyPage() {
               <div className="money-footer-actions">
                 <a
                   href={returnHref}
-                  className="flow-btn money-primary-btn money-panel-nav-btn"
+                  className="flow-btn money-nav-home-btn money-panel-nav-btn"
                 >
                   {returnLabel}
                 </a>
                 <a
                   href="/play"
-                  className="flow-btn money-primary-btn money-panel-nav-btn"
+                  className="flow-btn money-nav-play-btn money-panel-nav-btn"
                 >
                   PLAY GAME
                 </a>
