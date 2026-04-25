@@ -10,6 +10,13 @@ const EIP712_DOMAIN = {
   verifyingContract: env.GAME_SETTLEMENT_ADDRESS as Address,
 } as const;
 
+const PASSPORT_EIP712_DOMAIN = {
+  name: "ChickenTrustPassport",
+  version: "1",
+  chainId: env.MONAD_CHAIN_ID,
+  verifyingContract: env.TRUST_PASSPORT_ADDRESS as Address,
+} as const;
+
 const RESOLUTION_TYPES = {
   Resolution: [
     { name: "sessionId", type: "bytes32" },
@@ -19,6 +26,16 @@ const RESOLUTION_TYPES = {
     { name: "finalMultiplierBp", type: "uint256" },
     { name: "outcome", type: "uint8" },
     { name: "deadline", type: "uint64" },
+  ],
+} as const;
+
+const PASSPORT_CLAIM_TYPES = {
+  PassportClaim: [
+    { name: "player", type: "address" },
+    { name: "tier", type: "uint8" },
+    { name: "issuedAt", type: "uint64" },
+    { name: "expiry", type: "uint64" },
+    { name: "nonce", type: "uint256" },
   ],
 } as const;
 
@@ -47,6 +64,26 @@ export interface SignedSettlementResult {
     finalMultiplierBp: string;
     outcome: number;
     deadline: string;
+  };
+  signerAddress: Address;
+}
+
+export interface PassportClaimPayload {
+  player: Address;
+  tier: number;
+  issuedAt: bigint;
+  expiry: bigint;
+  nonce: bigint;
+}
+
+export interface SignedPassportClaimResult {
+  signature: Hex;
+  claim: {
+    player: Address;
+    tier: number;
+    issuedAt: string;
+    expiry: string;
+    nonce: string;
   };
   signerAddress: Address;
 }
@@ -135,6 +172,64 @@ export async function signSettlement(params: {
       finalMultiplierBp: resolution.finalMultiplierBp.toString(),
       outcome: resolution.outcome,
       deadline: resolution.deadline.toString(),
+    },
+    signerAddress: account.address,
+  };
+}
+
+export function createPassportClaimPayload(params: {
+  playerAddress: string;
+  tier: number;
+  issuedAt?: number;
+  expiry?: number;
+  nonce?: bigint;
+}): PassportClaimPayload {
+  const now = Math.floor(Date.now() / 1000);
+  const issuedAt = params.issuedAt ?? now;
+  const expiry = params.expiry ?? now + env.PASSPORT_VALIDITY_SECONDS;
+  const nonce =
+    params.nonce ??
+    BigInt(`0x${randomBytes(32).toString("hex")}`);
+
+  return {
+    player: params.playerAddress as Address,
+    tier: params.tier,
+    issuedAt: BigInt(issuedAt),
+    expiry: BigInt(expiry),
+    nonce,
+  };
+}
+
+export async function signPassportClaim(params: {
+  playerAddress: string;
+  tier: number;
+  issuedAt?: number;
+  expiry?: number;
+  nonce?: bigint;
+}): Promise<SignedPassportClaimResult> {
+  const account = getSignerAccount();
+  const claim = createPassportClaimPayload(params);
+
+  const walletClient = createWalletClient({
+    account,
+    transport: http(env.MONAD_RPC_URL),
+  });
+
+  const signature = await walletClient.signTypedData({
+    domain: PASSPORT_EIP712_DOMAIN,
+    types: PASSPORT_CLAIM_TYPES,
+    primaryType: "PassportClaim",
+    message: claim,
+  });
+
+  return {
+    signature,
+    claim: {
+      player: claim.player,
+      tier: claim.tier,
+      issuedAt: claim.issuedAt.toString(),
+      expiry: claim.expiry.toString(),
+      nonce: claim.nonce.toString(),
     },
     signerAddress: account.address,
   };

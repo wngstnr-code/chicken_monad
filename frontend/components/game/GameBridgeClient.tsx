@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { io, type Socket } from "socket.io-client";
 import { formatUnits, isAddress, parseUnits } from "viem";
-import type { Address, Hash } from "viem";
+import type { Address, Hash, Hex } from "viem";
 import {
   readContract,
   waitForTransactionReceipt,
@@ -24,11 +24,14 @@ import {
   GAME_SETTLEMENT_ADDRESS,
   GAME_VAULT_ABI,
   GAME_VAULT_ADDRESS,
+  TRUST_PASSPORT_ABI,
+  TRUST_PASSPORT_ADDRESS,
   USDC_ADDRESS,
   USDC_DECIMALS,
   USDC_FAUCET_ABI,
   USDC_FAUCET_ADDRESS,
   hasGameContractConfig,
+  hasPassportContractConfig,
 } from "../../lib/web3/contracts";
 
 type GameBridgeClientProps = {
@@ -83,6 +86,20 @@ type ActiveBackendSessionPayload = {
   } | null;
 };
 
+type PassportIssueSignaturePayload = {
+  success: boolean;
+  claim: {
+    player: string;
+    tier: number;
+    issuedAt: string;
+    expiry: string;
+    nonce: string;
+  };
+  signature: string;
+  signatureExpiry: number;
+  eligibility: ChickenBridgePassportEligibility;
+};
+
 type PendingResolver<T> = {
   resolve: (value: T) => void;
   reject: (reason?: unknown) => void;
@@ -93,6 +110,13 @@ const RESPONSE_TIMEOUT_MS = 45_000;
 const RECONNECT_GRACE_TIMEOUT_MS = 32_000;
 const APPROVE_MAX_USDC_UNITS = parseUnits("10000000", USDC_DECIMALS);
 const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
+const ACTIVE_SESSION_CACHE_MS = 1200;
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
 
 function normalizeError(error: unknown, fallback: string) {
   return readRawErrorMessage(error, fallback);
@@ -187,6 +211,15 @@ export function GameBridgeClient({
     null,
   );
   const reconnectTimeoutRef = useRef<number | null>(null);
+  const activeSessionCacheRef = useRef<{
+    address: Address | null;
+    value: string;
+    fetchedAt: number;
+  }>({
+    address: null,
+    value: ZERO_BYTES32,
+    fetchedAt: 0,
+  });
 
   useEffect(() => {
     if (backgroundMode) return;
@@ -260,6 +293,30 @@ export function GameBridgeClient({
         autoSettlePending: async () => false,
         getPlayBlocker: async () => ({ kind: "none" }),
         resolvePlayBlocker: async () => false,
+        getPassportStatus: async () => ({
+          walletAddress: "",
+          eligibility: {
+            eligible: false,
+            tier: 0,
+            reason: "Background mode.",
+            stats: {
+              runsEvaluated: 0,
+              bestHops: 0,
+              averageHops: 0,
+            },
+          },
+          passport: {
+            configured: false,
+            valid: false,
+            tier: 0,
+            issuedAt: 0,
+            expiry: 0,
+            revoked: false,
+          },
+        }),
+        claimPassport: async () => {
+          throw new Error("Background mode tidak mendukung claim passport.");
+        },
       };
 
       return () => {
@@ -506,6 +563,35 @@ export function GameBridgeClient({
       return account as Address;
     }
 
+    function isRateLimitedRpcError(error: unknown) {
+      const message = normalizeError(error, "").toLowerCase();
+      return (
+        message.includes("requests limited to 15/sec") ||
+        message.includes("rate limit") ||
+        message.includes("429") ||
+        message.includes("too many requests")
+      );
+    }
+
+    async function readContractWithRetry<T>(
+      reader: () => Promise<T>,
+      retries = 3,
+    ): Promise<T> {
+      let attempt = 0;
+      while (true) {
+        try {
+          return await reader();
+        } catch (error) {
+          if (!isRateLimitedRpcError(error) || attempt >= retries) {
+            throw error;
+          }
+          const backoffMs = 250 * Math.pow(2, attempt);
+          attempt += 1;
+          await sleep(backoffMs);
+        }
+      }
+    }
+
     async function requireReadyGameWallet() {
       const playerAddress = await requireOnchainWallet();
       if (!hasBackendConfig) {
@@ -547,36 +633,67 @@ export function GameBridgeClient({
     }
 
     async function readAvailableBalance(address: Address) {
-      const value = await readContract(wagmiConfig, {
-        address: GAME_VAULT_ADDRESS as Address,
-        abi: GAME_VAULT_ABI,
-        functionName: "availableBalanceOf",
-        args: [address],
-      });
+      const value = await readContractWithRetry(() =>
+        readContract(wagmiConfig, {
+          address: GAME_VAULT_ADDRESS as Address,
+          abi: GAME_VAULT_ABI,
+          functionName: "availableBalanceOf",
+          args: [address],
+        }),
+      );
 
       return toNumberAmount(value);
     }
 
     async function readLockedBalance(address: Address) {
-      const value = await readContract(wagmiConfig, {
-        address: GAME_VAULT_ADDRESS as Address,
-        abi: GAME_VAULT_ABI,
-        functionName: "lockedBalanceOf",
-        args: [address],
-      });
+      const value = await readContractWithRetry(() =>
+        readContract(wagmiConfig, {
+          address: GAME_VAULT_ADDRESS as Address,
+          abi: GAME_VAULT_ABI,
+          functionName: "lockedBalanceOf",
+          args: [address],
+        }),
+      );
 
       return toNumberAmount(value);
     }
 
     async function readActiveSessionId(address: Address) {
-      const value = await readContract(wagmiConfig, {
-        address: GAME_SETTLEMENT_ADDRESS as Address,
-        abi: GAME_SETTLEMENT_ABI,
-        functionName: "activeSessionOf",
-        args: [address],
-      });
+      const cached = activeSessionCacheRef.current;
+      const now = Date.now();
+      if (
+        cached.address &&
+        cached.address.toLowerCase() === address.toLowerCase() &&
+        now - cached.fetchedAt < ACTIVE_SESSION_CACHE_MS
+      ) {
+        return cached.value;
+      }
 
-      return String(value || "");
+      const value = await readContractWithRetry(() =>
+        readContract(wagmiConfig, {
+          address: GAME_SETTLEMENT_ADDRESS as Address,
+          abi: GAME_SETTLEMENT_ABI,
+          functionName: "activeSessionOf",
+          args: [address],
+        }),
+      );
+
+      const normalized = String(value || "");
+      activeSessionCacheRef.current = {
+        address,
+        value: normalized,
+        fetchedAt: now,
+      };
+
+      return normalized;
+    }
+
+    function invalidateActiveSessionCache() {
+      activeSessionCacheRef.current = {
+        address: null,
+        value: ZERO_BYTES32,
+        fetchedAt: 0,
+      };
     }
 
     function isZeroSessionId(value: string) {
@@ -598,23 +715,27 @@ export function GameBridgeClient({
     }
 
     async function readWalletUsdcBalance(address: Address) {
-      const value = await readContract(wagmiConfig, {
-        address: USDC_ADDRESS as Address,
-        abi: ERC20_ABI,
-        functionName: "balanceOf",
-        args: [address],
-      });
+      const value = await readContractWithRetry(() =>
+        readContract(wagmiConfig, {
+          address: USDC_ADDRESS as Address,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [address],
+        }),
+      );
 
       return toNumberAmount(value);
     }
 
     async function readUsdcAllowance(owner: Address) {
-      const value = await readContract(wagmiConfig, {
-        address: USDC_ADDRESS as Address,
-        abi: ERC20_ABI,
-        functionName: "allowance",
-        args: [owner, GAME_VAULT_ADDRESS as Address],
-      });
+      const value = await readContractWithRetry(() =>
+        readContract(wagmiConfig, {
+          address: USDC_ADDRESS as Address,
+          abi: ERC20_ABI,
+          functionName: "allowance",
+          args: [owner, GAME_VAULT_ADDRESS as Address],
+        }),
+      );
 
       return value;
     }
@@ -624,6 +745,7 @@ export function GameBridgeClient({
     ) {
       const txHash = await writeContract(wagmiConfig, request);
       await waitForTransactionReceipt(wagmiConfig, { hash: txHash as Hash });
+      invalidateActiveSessionCache();
       return txHash as string;
     }
 
@@ -1110,6 +1232,79 @@ export function GameBridgeClient({
 
         const refreshedBlocker = await refreshPlayBlockerStatus();
         return refreshedBlocker.kind === "none";
+      },
+      getPassportStatus: async () => {
+        await requireBackendWalletSession();
+        return backendFetch<ChickenBridgePassportStatus>("/api/passport/status");
+      },
+      claimPassport: async () => {
+        const playerAddress = await requireReadyGameWallet();
+        if (!hasPassportContractConfig() || !isAddress(TRUST_PASSPORT_ADDRESS)) {
+          throw new Error("Config TRUST_PASSPORT_ADDRESS belum valid.");
+        }
+
+        const status = await backendFetch<ChickenBridgePassportStatus>(
+          "/api/passport/status",
+        );
+        if (!status.eligibility?.eligible || status.eligibility.tier <= 0) {
+          throw new Error(
+            status.eligibility?.reason || "Belum eligible untuk claim passport.",
+          );
+        }
+
+        const issued = await backendPost<PassportIssueSignaturePayload>(
+          "/api/passport/issue-signature",
+          {},
+        );
+
+        const claim = issued?.claim;
+        const signature = String(issued?.signature || "");
+        if (!claim || !signature) {
+          throw new Error(
+            "Backend tidak mengembalikan signature passport yang valid.",
+          );
+        }
+
+        if (
+          String(claim.player || "").toLowerCase() !==
+          String(playerAddress).toLowerCase()
+        ) {
+          throw new Error(
+            "Signer payload player tidak cocok dengan wallet aktif.",
+          );
+        }
+
+        let txHash: string;
+        try {
+          txHash = await writeAndConfirm({
+            address: TRUST_PASSPORT_ADDRESS as Address,
+            abi: TRUST_PASSPORT_ABI,
+            functionName: "claimWithSignature",
+            args: [
+              {
+                player: claim.player as Address,
+                tier: Number(claim.tier),
+                issuedAt: BigInt(claim.issuedAt),
+                expiry: BigInt(claim.expiry),
+                nonce: BigInt(claim.nonce),
+              },
+              signature as Hex,
+            ],
+          });
+        } catch (error) {
+          throw new Error(
+            toUserFacingWalletError(error, "Claim passport gagal.", {
+              userRejectedMessage: "Claim passport dibatalkan di wallet.",
+            }),
+          );
+        }
+
+        return {
+          txHash,
+          tier: Number(claim.tier),
+          expiry: Number(claim.expiry),
+          signatureExpiry: Number(issued.signatureExpiry || 0),
+        };
       },
       startBet: async (stake: number) => {
         const playerAddress = await requireReadyGameWallet();

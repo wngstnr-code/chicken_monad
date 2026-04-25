@@ -1,6 +1,7 @@
 import {
   createPublicClient,
   createWalletClient,
+  encodeFunctionData,
   http,
   isHex,
   parseAbi,
@@ -13,7 +14,8 @@ import { env } from "../config/env.js";
 const GAME_SETTLEMENT_WRITE_ABI = parseAbi([
   "function settleWithSignature((bytes32 sessionId,address player,uint256 stakeAmount,uint256 payoutAmount,uint256 finalMultiplierBp,uint8 outcome,uint64 deadline) resolution, bytes signature)",
 ]);
-const SETTLEMENT_GAS_LIMIT = 350_000n;
+const SETTLEMENT_GAS_BUFFER = 35_000n;
+const SETTLEMENT_MIN_GAS_LIMIT = 420_000n;
 
 type SettlementResolutionInput = {
   sessionId: string;
@@ -90,13 +92,37 @@ export async function submitSettlementOnchain(params: {
   }
 
   const normalizedResolution = normalizeResolution(params.resolution);
+  const args = [normalizedResolution, signature as Hex] as const;
+
+  await settlementPublicClient.call({
+    account: account.address,
+    to: env.GAME_SETTLEMENT_ADDRESS as Address,
+    data: encodeFunctionData({
+      abi: GAME_SETTLEMENT_WRITE_ABI,
+      functionName: "settleWithSignature",
+      args,
+    }),
+  });
+
+  const estimatedGas = await settlementPublicClient.estimateContractGas({
+    account,
+    address: env.GAME_SETTLEMENT_ADDRESS as Address,
+    abi: GAME_SETTLEMENT_WRITE_ABI,
+    functionName: "settleWithSignature",
+    args,
+  });
+  const gasLimit =
+    estimatedGas + SETTLEMENT_GAS_BUFFER > SETTLEMENT_MIN_GAS_LIMIT
+      ? estimatedGas + SETTLEMENT_GAS_BUFFER
+      : SETTLEMENT_MIN_GAS_LIMIT;
+
   const txHash = await settlementWalletClient.writeContract({
     chain: null,
     address: env.GAME_SETTLEMENT_ADDRESS as Address,
     abi: GAME_SETTLEMENT_WRITE_ABI,
     functionName: "settleWithSignature",
-    args: [normalizedResolution, signature as Hex],
-    gas: SETTLEMENT_GAS_LIMIT,
+    args,
+    gas: gasLimit,
   });
 
   const receipt = await settlementPublicClient.waitForTransactionReceipt({

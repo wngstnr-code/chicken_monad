@@ -51,6 +51,8 @@ export function PlayTopNav() {
   const [isWalletMenuOpen, setIsWalletMenuOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [sfxVolumePercent, setSfxVolumePercent] = useState(90);
+  const [passportStatusText, setPassportStatusText] = useState("");
+  const [passportBusy, setPassportBusy] = useState(false);
   const [transientStatus, setTransientStatus] =
     useState<PlayStatusState | null>(null);
   const [playBlocker, setPlayBlocker] =
@@ -123,6 +125,93 @@ export function PlayTopNav() {
     setTimeout(() => {
       window.dispatchEvent(new CustomEvent("chicken:open-stats"));
     }, 10);
+  }
+
+  function getBridgeApi() {
+    const bridge = window.__CHICKEN_MONAD_BRIDGE__;
+    if (!bridge || bridge.backgroundMode) {
+      throw new Error("Game bridge belum siap.");
+    }
+    return bridge;
+  }
+
+  async function onCheckPassportClick() {
+    if (passportBusy) return;
+    setPassportBusy(true);
+    try {
+      const bridge = getBridgeApi();
+      const status = await bridge.getPassportStatus();
+      const passport = status.passport;
+      if (passport?.valid) {
+        const expiryText = passport.expiry
+          ? new Date(passport.expiry * 1000).toLocaleDateString()
+          : "-";
+        const message = `PASSPORT VALID • TIER ${passport.tier} • EXP ${expiryText}`;
+        setPassportStatusText(message);
+        dispatchStatusUpdate({
+          message,
+          tone: "ready",
+          durationMs: 3600,
+        });
+        return;
+      }
+
+      const eligibility = status.eligibility;
+      const message = eligibility?.eligible
+        ? `ELIGIBLE TIER ${eligibility.tier} • READY TO CLAIM`
+        : (eligibility?.reason || "Belum eligible untuk passport.");
+      setPassportStatusText(message);
+      dispatchStatusUpdate({
+        message,
+        tone: eligibility?.eligible ? "warning" : "info",
+        durationMs: 4200,
+      });
+    } catch (error) {
+      const message = readActionErrorMessage(
+        error,
+        "Gagal cek passport status.",
+      );
+      setPassportStatusText(message);
+      dispatchStatusUpdate({
+        message,
+        tone: "error",
+        durationMs: 4200,
+      });
+    } finally {
+      setPassportBusy(false);
+    }
+  }
+
+  async function onClaimPassportClick() {
+    if (passportBusy) return;
+    setPassportBusy(true);
+    try {
+      const bridge = getBridgeApi();
+      const result = await bridge.claimPassport();
+      const expiryText = result.expiry
+        ? new Date(result.expiry * 1000).toLocaleDateString()
+        : "-";
+      const message = `PASSPORT CLAIMED • TIER ${result.tier} • EXP ${expiryText}`;
+      setPassportStatusText(message);
+      dispatchStatusUpdate({
+        message,
+        tone: "ready",
+        durationMs: 4200,
+      });
+    } catch (error) {
+      const message = readActionErrorMessage(
+        error,
+        "Claim passport gagal.",
+      );
+      setPassportStatusText(message);
+      dispatchStatusUpdate({
+        message,
+        tone: "error",
+        durationMs: 4200,
+      });
+    } finally {
+      setPassportBusy(false);
+    }
   }
 
   function onLeaderboardMenuClick() {
@@ -577,6 +666,29 @@ export function PlayTopNav() {
                   >
                     LEADERBOARD
                   </button>
+                  <button
+                    type="button"
+                    className="play-menu-modal-item menu-item-passport-check"
+                    onClick={() => {
+                      void onCheckPassportClick();
+                    }}
+                    disabled={passportBusy}
+                  >
+                    CHECK PASSPORT
+                  </button>
+                  <button
+                    type="button"
+                    className="play-menu-modal-item menu-item-passport-claim"
+                    onClick={() => {
+                      void onClaimPassportClick();
+                    }}
+                    disabled={passportBusy}
+                  >
+                    {passportBusy ? "PROCESSING..." : "CLAIM PASSPORT"}
+                  </button>
+                  {passportStatusText ? (
+                    <p className="play-menu-passport-status">{passportStatusText}</p>
+                  ) : null}
                   <div className="play-menu-volume">
                     <div className="play-menu-volume-head">
                       <span>SFX VOLUME</span>

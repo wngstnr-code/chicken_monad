@@ -2240,6 +2240,28 @@ canvas.game {
   color: #0c3d2c;
 }
 
+.menu-item-passport-check {
+  background: linear-gradient(180deg, #88c6ff 0%, #4f8fd4 100%);
+  color: #06233f;
+}
+
+.menu-item-passport-claim {
+  background: linear-gradient(180deg, #d6b3ff 0%, #8b5ed6 100%);
+  color: #fff;
+}
+
+.play-menu-passport-status {
+  margin: -4px 0 0;
+  padding: 10px 12px;
+  border: 2px dashed rgba(44, 62, 80, 0.35);
+  border-radius: 10px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #2c3e50;
+  background: rgba(255, 255, 255, 0.55);
+  text-align: center;
+}
+
 /* Logout - Red */
 .play-menu-modal-item.logout {
   background: linear-gradient(180deg, #ff8a8a 0%, #dd3d3d 100%);

@@ -122,6 +122,39 @@ type ChickenBridgePlayBlocker =
       pendingCount?: number;
     };
 
+type ChickenBridgePassportEligibility = {
+  eligible: boolean;
+  tier: number;
+  reason: string;
+  stats: {
+    runsEvaluated: number;
+    bestHops: number;
+    averageHops: number;
+  };
+};
+
+type ChickenBridgePassportOnchain = {
+  configured: boolean;
+  valid: boolean;
+  tier: number;
+  issuedAt: number;
+  expiry: number;
+  revoked: boolean;
+};
+
+type ChickenBridgePassportStatus = {
+  walletAddress: string;
+  eligibility: ChickenBridgePassportEligibility;
+  passport: ChickenBridgePassportOnchain;
+};
+
+type ChickenBridgePassportClaimResult = {
+  txHash: string;
+  tier: number;
+  expiry: number;
+  signatureExpiry: number;
+};
+
 type ChickenBridgeApi = {
   backgroundMode: boolean;
   loadAvailableBalance: () => Promise<number>;
@@ -143,6 +176,8 @@ type ChickenBridgeApi = {
   autoSettlePending: () => Promise<boolean>;
   getPlayBlocker: () => Promise<ChickenBridgePlayBlocker>;
   resolvePlayBlocker: () => Promise<boolean>;
+  getPassportStatus: () => Promise<ChickenBridgePassportStatus>;
+  claimPassport: () => Promise<ChickenBridgePassportClaimResult>;
 };
 
 interface Window {

@@ -99,6 +99,13 @@ npm start
 | GET    | `/api/player/stats`        | 🔒   | Player statistics     |
 | GET    | `/api/player/transactions` | 🔒   | Blockchain tx history |
 
+### Trust Passport
+
+| Method | Endpoint                       | Auth | Description                                 |
+| ------ | ------------------------------ | ---- | ------------------------------------------- |
+| GET    | `/api/passport/status`         | 🔒   | Get eligibility + current onchain passport  |
+| POST   | `/api/passport/issue-signature` | 🔒 | Issue EIP-712 signature for passport claim  |
+
 ### WebSocket Events
 
 | Direction | Event                 | Description                                  |
@@ -137,5 +144,8 @@ npm start
 | `MONAD_CHAIN_ID`            | No       | Monad chain ID (default: 10143)                        |
 | `GAME_VAULT_ADDRESS`        | No       | `GameVault` proxy address                              |
 | `GAME_SETTLEMENT_ADDRESS`   | No       | `GameSettlement` proxy address                         |
+| `TRUST_PASSPORT_ADDRESS`    | No       | `TrustPassport` proxy address                          |
 | `BACKEND_PRIVATE_KEY`       | No       | Private key for signing settlement payloads            |
 | `SETTLEMENT_SIGNATURE_TTL_SECONDS` | No | Settlement signature expiry in seconds (default: 86400) |
+| `PASSPORT_SIGNATURE_TTL_SECONDS` | No | Passport claim signature TTL in seconds (default: 900) |
+| `PASSPORT_VALIDITY_SECONDS` | No       | Passport validity period in seconds (default: 2592000) |

@@ -44,6 +44,9 @@ function toSettlementErrorMessage(error: unknown) {
   if (lower.includes("invalidsigner")) {
     return "Failed to submit settlement onchain: signer backend tidak cocok dengan signer di contract.";
   }
+  if (lower.includes("invalidsignaturesigner")) {
+    return "Failed to submit settlement onchain: signature backend tidak cocok dengan backendSigner onchain.";
+  }
   if (lower.includes("sessionalreadysettled")) {
     return "Settlement session ini sudah settled onchain.";
   }
@@ -58,6 +61,12 @@ function toSettlementErrorMessage(error: unknown) {
   }
   if (lower.includes("insufficienttreasury")) {
     return "Treasury vault tidak cukup untuk payout settlement ini.";
+  }
+  if (lower.includes("resolutionpayoutmismatch")) {
+    return "Failed to submit settlement onchain: payload payout tidak cocok dengan rule settlement onchain.";
+  }
+  if (lower.includes("resolutionstakemismatch")) {
+    return "Failed to submit settlement onchain: payload stake tidak cocok dengan data session onchain.";
   }
   if (lower.includes("sessionnotactive") || lower.includes("session already settled")) {
     return "Settlement session ini sudah tidak aktif onchain.";
@@ -86,18 +95,37 @@ function parsePaginationParam(value: unknown, fallback: number, min: number, max
   return Math.min(Math.max(parsed, min), max);
 }
 
-function buildResolutionFromSession(walletAddress: string, session: Record<string, unknown>) {
+function getSettlementAmounts(session: Record<string, unknown>) {
   const stakeAmount = Number(session.stake_amount ?? 0);
-  const payoutAmount = Number(session.payout_amount ?? 0);
-  const finalMultiplier = Number(session.final_multiplier ?? 0);
-  const finalMultiplierBp = Math.round(finalMultiplier * 10_000);
   const status = String(session.status ?? "");
+  const finalMultiplierBp =
+    status === "CRASHED"
+      ? 0
+      : Math.round(Number(session.final_multiplier ?? 0) * 10_000);
+  const stakeUnits = usdcToUint256(stakeAmount);
+  const payoutUnits =
+    status === "CRASHED"
+      ? 0n
+      : (stakeUnits * BigInt(finalMultiplierBp)) / 10_000n;
+
+  return {
+    stakeAmount,
+    stakeUnits,
+    payoutAmount: Number(payoutUnits) / 1_000_000,
+    payoutUnits,
+    finalMultiplierBp,
+  };
+}
+
+function buildResolutionFromSession(walletAddress: string, session: Record<string, unknown>) {
+  const status = String(session.status ?? "");
+  const { stakeUnits, payoutUnits, finalMultiplierBp } = getSettlementAmounts(session);
 
   return {
     sessionId: String(session.onchain_session_id),
     player: walletAddress,
-    stakeAmount: usdcToUint256(stakeAmount).toString(),
-    payoutAmount: usdcToUint256(payoutAmount).toString(),
+    stakeAmount: stakeUnits.toString(),
+    payoutAmount: payoutUnits.toString(),
     finalMultiplierBp: status === "CRASHED" ? "0" : finalMultiplierBp.toString(),
     outcome: status === "CRASHED" ? 2 : 1,
     deadline: String(session.settlement_deadline ?? "0"),
@@ -126,10 +154,32 @@ async function submitSettlementForSession(params: {
     settlement_deadline: ensuredSettlement.deadline,
   };
   const resolution = buildResolutionFromSession(walletAddress, normalizedSession);
-  const txHash = await submitSettlementOnchain({
-    resolution,
-    signature: ensuredSettlement.signature,
-  });
+  let txHash: string;
+  try {
+    txHash = await submitSettlementOnchain({
+      resolution,
+      signature: ensuredSettlement.signature,
+    });
+  } catch (firstSubmitError) {
+    const refreshedSettlement = await ensureSettlementSignature(walletAddress, session, {
+      forceRefresh: true,
+    });
+
+    if (!refreshedSettlement?.signature || !refreshedSettlement.deadline) {
+      throw firstSubmitError;
+    }
+
+    const retrySession = {
+      ...session,
+      settlement_signature: refreshedSettlement.signature,
+      settlement_deadline: refreshedSettlement.deadline,
+    };
+
+    txHash = await submitSettlementOnchain({
+      resolution: buildResolutionFromSession(walletAddress, retrySession),
+      signature: refreshedSettlement.signature,
+    });
+  }
 
   const { error } = await supabase
     .from("game_sessions")
@@ -150,6 +200,7 @@ async function clearUnsettlablePendingSession(sessionId: string) {
     .update({
       settlement_signature: null,
       settlement_deadline: null,
+      settlement_tx_hash: "not-pending-onchain",
     })
     .eq("session_id", sessionId);
 
@@ -227,13 +278,16 @@ async function crashAndPersistSession(params: {
 async function ensureSettlementSignature(
   walletAddress: string,
   session: Record<string, unknown>,
+  options?: { forceRefresh?: boolean },
 ) {
+  const forceRefresh = Boolean(options?.forceRefresh);
   const existingSignature = String(session.settlement_signature ?? "").trim();
   const existingDeadline = Number(session.settlement_deadline ?? 0);
   const now = Math.floor(Date.now() / 1000);
   const minValidSeconds = 30;
 
   if (
+    !forceRefresh &&
     existingSignature &&
     existingDeadline > 0 &&
     existingDeadline > now + minValidSeconds
@@ -250,15 +304,14 @@ async function ensureSettlementSignature(
   }
 
   try {
+    const { stakeAmount, payoutAmount, finalMultiplierBp } =
+      getSettlementAmounts(session);
     const settlement = await signSettlement({
       playerAddress: walletAddress,
       onchainSessionId: String(session.onchain_session_id ?? ""),
-      stakeAmount: Number(session.stake_amount ?? 0),
-      payoutAmount: Number(session.payout_amount ?? 0),
-      finalMultiplierBp:
-        status === "CRASHED"
-          ? 0
-          : Math.round(Number(session.final_multiplier ?? 0) * 10_000),
+      stakeAmount,
+      payoutAmount,
+      finalMultiplierBp,
       outcome:
         status === "CRASHED"
           ? SETTLEMENT_OUTCOME.CRASHED
@@ -271,6 +324,7 @@ async function ensureSettlementSignature(
     const { error } = await supabase
       .from("game_sessions")
       .update({
+        payout_amount: payoutAmount,
         settlement_signature: nextSignature,
         settlement_deadline: nextDeadline,
       })
